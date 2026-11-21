@@ -257,6 +257,17 @@ enum RemoteAction {
         #[arg(long)]
         runtime: Option<String>,
     },
+    /// Execute a command on a linked LAN/SSH computer (equivalent to `ssh <host> <cmd>`)
+    Exec {
+        /// Linked host id (e.g. lan-xxxx)
+        host: String,
+        /// Optional working directory on the remote computer
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Command string or argv to execute on the remote computer
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -924,6 +935,9 @@ fn main() -> Result<()> {
                 json,
                 runtime,
             } => commands::remote::doctor(&target, json, runtime.as_deref())?,
+            RemoteAction::Exec { host, cwd, command } => {
+                commands::remote::exec_linked(&host, cwd.as_deref(), &command)?
+            }
         },
     }
     Ok(())

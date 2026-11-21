@@ -391,8 +391,10 @@ function renderRemoteHostList(rows: RemoteHostRow[]): void {
             <span class="remote-host-status ${badge.className}"><i></i>${escapeHtml(badge.label)}</span>
           </div>
           ${note ? `<p class="remote-host-note">${escapeHtml(note)}</p>` : ""}
-          <div class="ws-manage-actions">${main}</div>
-          <div class="remote-host-foot">${links.join("")}</div>
+          <div class="remote-host-actions">
+            ${main}
+            <span class="remote-host-links">${links.join("")}</span>
+          </div>
         </li>
       `;
     })
@@ -427,34 +429,32 @@ function renderNearby(peers: Array<{ id: string; name: string }>): void {
   }
   const rows = [...merged.entries()].sort((a, b) => a[1].localeCompare(b[1], "zh"));
   if (rows.length === 0) {
-    nearbyListEl.innerHTML = `<li class="ws-manage-item"><span class="remote-host-note">${escapeHtml(t("remote.nearbyEmpty"))}</span></li>`;
+    nearbyListEl.innerHTML = `<li class="remote-empty">${escapeHtml(t("remote.nearbyEmpty"))}</li>`;
     return;
   }
   nearbyListEl.innerHTML = rows
     .map(([id, name]) => {
       const view = nearbyViews.get(id);
       const note = view?.message
-        ? `<p class="remote-host-note">${escapeHtml(view.message)}</p>`
+        ? `<p class="remote-peer-note">${escapeHtml(view.message)}</p>`
         : "";
       const projects = (view?.projects ?? [])
         .map(
           (project) =>
-            `<p class="remote-host-note">${escapeHtml(project.name)} · ${escapeHtml(project.path)}</p>`,
+            `<p class="remote-peer-note">${escapeHtml(project.name)} · ${escapeHtml(project.path)}</p>`,
         )
         .join("");
       const button =
         !view || view.phase === "failed"
-          ? `<div class="ws-manage-actions"><button type="button" class="btn-primary btn-compact" data-nearby-use="${escapeHtml(id)}">${escapeHtml(t("remote.nearbyUse"))}</button></div>`
+          ? `<button type="button" class="btn-primary btn-compact remote-peer-action" data-nearby-use="${escapeHtml(id)}">${escapeHtml(t("remote.nearbyUse"))}</button>`
           : "";
       return `
-        <li class="ws-manage-item remote-host-card">
-          <div class="remote-host-head">
-            <div class="ws-manage-main">
-              <strong>${escapeHtml(name)}</strong>
-            </div>
+        <li class="remote-peer">
+          <div class="remote-peer-body">
+            <strong>${escapeHtml(name)}</strong>
+            ${note}
+            ${projects}
           </div>
-          ${note}
-          ${projects}
           ${button}
         </li>
       `;

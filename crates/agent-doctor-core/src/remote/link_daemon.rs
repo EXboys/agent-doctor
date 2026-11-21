@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -13,8 +14,8 @@ use tungstenite::{accept, Message, WebSocket};
 
 use super::link_files::{list_absolute_dir, list_dir, read_file, write_file};
 use super::link_protocol::{
-    methods, LinkDoctorSummary, LinkFixSummary, LinkHello, LinkInitResult, LinkPush, LinkRequest,
-    LinkResponse, LinkWorkspaceRow, LINK_DAEMON_PORT,
+    methods, LinkDoctorSummary, LinkExecResult, LinkFixSummary, LinkHello, LinkInitResult,
+    LinkPush, LinkRequest, LinkResponse, LinkWorkspaceRow, LINK_DAEMON_PORT,
 };
 use crate::workspace::{
     ensure_default_workspace, init_workspace, load_workspaces, workspace_doctor, workspace_fix,
@@ -33,28 +34,32 @@ pub enum LinkMethodOutcome {
     Deferred,
 }
 
+enum OutboundFrame {
+    Text(String),
+    Pong(Vec<u8>),
+}
+
 /// Shared writer for one accepted WebSocket client.
+///
+/// Sending queues onto an `mpsc` channel owned by the socket's single loop
+/// thread instead of competing with `ws.read()` for a `Mutex<WebSocket>`. On
+/// macOS (`os_unfair_lock`) a tight read-timeout loop re-acquires the mutex in
+/// nanoseconds and starves background prompt threads forever.
 #[derive(Clone)]
 pub struct LinkSocket {
-    inner: Arc<Mutex<Ws>>,
+    tx: Sender<OutboundFrame>,
 }
 
 impl LinkSocket {
-    fn new(ws: Ws) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(ws)),
-        }
+    fn from_sender(tx: Sender<OutboundFrame>) -> Self {
+        Self { tx }
     }
 
     pub fn send_json(&self, value: &serde_json::Value) -> Result<()> {
         let body = serde_json::to_string(value).context("encode link frame")?;
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("link socket lock poisoned"))?;
-        guard
-            .send(Message::Text(body.into()))
-            .context("write link frame")?;
+        self.tx
+            .send(OutboundFrame::Text(body))
+            .map_err(|_| anyhow::anyhow!("link connection closed"))?;
         Ok(())
     }
 
@@ -72,11 +77,29 @@ impl LinkSocket {
         self.send_push(&LinkPush::prompt_event(payload))
     }
 
-    pub(crate) fn next_text(&self) -> Result<Option<String>> {
+    fn send_pong(&self, data: Vec<u8>) {
+        let _ = self.tx.send(OutboundFrame::Pong(data));
+    }
+}
+
+/// Exclusive WebSocket handle used during initial handshake before entering the
+/// event loop.
+pub(crate) struct AcceptedLinkSocket {
+    ws: Ws,
+}
+
+impl AcceptedLinkSocket {
+    pub(crate) fn next_text(&mut self) -> Result<Option<String>> {
+        let _ = self
+            .ws
+            .get_mut()
+            .set_read_timeout(Some(Duration::from_secs(15)));
         loop {
-            match self.read_message() {
+            match self.ws.read() {
                 Ok(Message::Text(text)) => return Ok(Some(text.to_string())),
-                Ok(Message::Ping(data)) => self.send_pong(data.to_vec()),
+                Ok(Message::Ping(data)) => {
+                    let _ = self.ws.send(Message::Pong(data));
+                }
                 Ok(Message::Close(_) | Message::Binary(_)) => return Ok(None),
                 Ok(Message::Pong(_) | Message::Frame(_)) => {}
                 Err(_) => return Ok(None),
@@ -84,36 +107,64 @@ impl LinkSocket {
         }
     }
 
-    fn read_message(&self) -> Result<Message> {
-        // Short read timeouts so a prompt worker can take the same mutex to
-        // push events while this loop waits for the next client RPC.
+    pub(crate) fn send_response(&mut self, response: &LinkResponse) -> Result<()> {
+        let body = serde_json::to_string(response).context("encode link response")?;
+        self.ws
+            .send(Message::Text(body.into()))
+            .context("write link response")?;
+        Ok(())
+    }
+
+    pub(crate) fn serve(mut self, first_text: Option<&str>) {
+        let (tx, rx) = mpsc::channel::<OutboundFrame>();
+        let socket = LinkSocket::from_sender(tx);
+        if let Some(text) = first_text {
+            if let Err(err) = dispatch_text(&socket, text) {
+                eprintln!("[link-daemon] dispatch initial: {err:#}");
+            }
+        }
         loop {
-            let mut guard = self
-                .inner
-                .lock()
-                .map_err(|_| anyhow::anyhow!("link socket lock poisoned"))?;
-            let _ = guard
+            if drain_outbound(&mut self.ws, &rx).is_err() {
+                break;
+            }
+            let _ = self
+                .ws
                 .get_mut()
-                .set_read_timeout(Some(Duration::from_millis(200)));
-            match guard.read() {
-                Ok(msg) => return Ok(msg),
-                Err(tungstenite::Error::Io(err))
-                    if err.kind() == std::io::ErrorKind::WouldBlock
-                        || err.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    drop(guard);
-                    continue;
+                .set_read_timeout(Some(Duration::from_millis(15)));
+            match self.ws.read() {
+                Ok(Message::Text(text)) => {
+                    if let Err(err) = dispatch_text(&socket, &text) {
+                        eprintln!("[link-daemon] dispatch: {err:#}");
+                    }
                 }
-                Err(err) => return Err(err).context("read link frame"),
+                Ok(Message::Ping(data)) => {
+                    socket.send_pong(data.to_vec());
+                }
+                Ok(Message::Close(_) | Message::Binary(_)) => {
+                    let _ = drain_outbound(&mut self.ws, &rx);
+                    break;
+                }
+                Ok(Message::Pong(_) | Message::Frame(_)) => {}
+                Err(tungstenite::Error::Io(err))
+                    if matches!(
+                        err.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(_) => break,
             }
         }
     }
+}
 
-    fn send_pong(&self, data: Vec<u8>) {
-        if let Ok(mut guard) = self.inner.lock() {
-            let _ = guard.send(Message::Pong(data.into()));
-        }
+fn drain_outbound(ws: &mut Ws, rx: &Receiver<OutboundFrame>) -> Result<()> {
+    while let Ok(frame) = rx.try_recv() {
+        let msg = match frame {
+            OutboundFrame::Text(body) => Message::Text(body.into()),
+            OutboundFrame::Pong(data) => Message::Pong(data.into()),
+        };
+        ws.send(msg).context("write link frame")?;
     }
+    Ok(())
 }
 
 /// Context passed to a registered custom method.
@@ -190,39 +241,17 @@ pub fn spawn_link_daemon() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn open_link_socket(stream: TcpStream) -> Result<LinkSocket> {
+pub(crate) fn open_link_socket(stream: TcpStream) -> Result<AcceptedLinkSocket> {
+    let _ = stream.set_nodelay(true);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
     let ws = accept(stream).context("WebSocket 握手失败")?;
-    Ok(LinkSocket::new(ws))
-}
-
-pub(crate) fn dispatch_link_text(socket: &LinkSocket, text: &str) -> Result<()> {
-    dispatch_text(socket, text)
-}
-
-pub(crate) fn serve_link_socket(socket: &LinkSocket) {
-    loop {
-        let msg = match socket.read_message() {
-            Ok(msg) => msg,
-            Err(_) => break,
-        };
-        match msg {
-            Message::Text(text) => {
-                if let Err(err) = dispatch_text(socket, &text) {
-                    eprintln!("[link-daemon] dispatch: {err:#}");
-                }
-            }
-            Message::Ping(data) => {
-                socket.send_pong(data.to_vec());
-            }
-            Message::Close(_) | Message::Binary(_) => break,
-            Message::Pong(_) | Message::Frame(_) => {}
-        }
-    }
+    Ok(AcceptedLinkSocket { ws })
 }
 
 fn handle_client(stream: TcpStream) -> Result<()> {
     let socket = open_link_socket(stream)?;
-    serve_link_socket(&socket);
+    socket.serve(None);
     Ok(())
 }
 
@@ -264,6 +293,31 @@ fn dispatch_text(socket: &LinkSocket, text: &str) -> Result<()> {
                 })?;
             }
         }
+        return Ok(());
+    }
+
+    if req.method == methods::EXEC {
+        let socket = socket.clone();
+        thread::Builder::new()
+            .name("ad-link-exec".into())
+            .spawn(move || {
+                let response = match run_builtin_exec(&req) {
+                    Ok(result) => LinkResponse {
+                        id: req.id,
+                        ok: true,
+                        result: Some(result),
+                        error: None,
+                    },
+                    Err(err) => LinkResponse {
+                        id: req.id,
+                        ok: false,
+                        result: None,
+                        error: Some(format!("{err:#}")),
+                    },
+                };
+                let _ = socket.send_response(&response);
+            })
+            .ok();
         return Ok(());
     }
 
@@ -444,6 +498,119 @@ fn handle_builtin(req: &LinkRequest) -> Result<serde_json::Value> {
     }
 }
 
+fn run_builtin_exec(req: &LinkRequest) -> Result<serde_json::Value> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let script = req
+        .params
+        .get("script")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .context("缺少要执行的命令")?;
+    let cwd = req
+        .params
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir);
+
+    #[cfg(unix)]
+    let mut cmd = {
+        let mut c = crate::exec::command_for_path(std::path::Path::new("sh"));
+        c.args(["-c", script]);
+        c.env("PATH", enriched_exec_path());
+        c
+    };
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = crate::exec::command_for_path(std::path::Path::new("cmd"));
+        c.args(["/C", script]);
+        c
+    };
+
+    cmd.current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().context("无法启动远程命令")?;
+    let pid = child.id();
+    let mut out_pipe = child.stdout.take();
+    let mut err_pipe = child.stderr.take();
+    let out_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(ref mut out) = out_pipe {
+            let _ = out.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let err_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(ref mut err) = err_pipe {
+            let _ = err.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let timeout = Duration::from_secs(120);
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status.code().unwrap_or(-1);
+        }
+        if started.elapsed() >= timeout {
+            crate::exec::kill_process_tree(pid);
+            let _ = child.wait();
+            bail!("命令执行超过 {} 秒已停止", timeout.as_secs());
+        }
+        thread::sleep(Duration::from_millis(40));
+    };
+
+    let stdout = String::from_utf8_lossy(&out_reader.join().unwrap_or_default()).into_owned();
+    let stderr = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
+    Ok(serde_json::to_value(LinkExecResult {
+        status,
+        stdout,
+        stderr,
+    })?)
+}
+
+#[cfg(unix)]
+fn enriched_exec_path() -> String {
+    let mut parts = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        for rel in [
+            ".local/bin",
+            ".cargo/bin",
+            ".bun/bin",
+            ".npm-global/bin",
+            "Library/pnpm",
+        ] {
+            let p = home.join(rel);
+            if p.is_dir() {
+                parts.push(p.to_string_lossy().into_owned());
+            }
+        }
+    }
+    for fixed in ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"] {
+        if std::path::Path::new(fixed).is_dir() {
+            parts.push(fixed.to_string());
+        }
+    }
+    if let Ok(existing) = std::env::var("PATH") {
+        parts.push(existing);
+    } else {
+        parts.push("/usr/bin:/bin:/usr/sbin:/sbin".to_string());
+    }
+    parts.join(":")
+}
+
 /// One-shot TCP probe used by the tunnel side after SSH is up.
 pub fn wait_for_local_port(port: u16, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
@@ -481,6 +648,7 @@ impl LinkDaemonGuard {
 mod tests {
     use super::*;
     use crate::remote::link_client::LinkClient;
+    use serde_json::json;
 
     #[test]
     fn ping_roundtrip_on_ephemeral_is_out_of_scope_here() {
@@ -488,5 +656,85 @@ mod tests {
         let response: LinkResponse = serde_json::from_str(raw).unwrap();
         assert!(response.ok);
         let _ = LinkClient::decode_hello(response.result.unwrap());
+    }
+
+    #[test]
+    fn deferred_worker_streams_push_and_final_reply_without_starvation() {
+        register_link_method(
+            "test_deferred_stream",
+            Arc::new(|ctx: LinkRpcContext| {
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(25));
+                    for idx in 0..4 {
+                        let _ = ctx.socket.emit_prompt_event(json!({ "seq": idx }));
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    let _ = ctx.socket.send_response(&LinkResponse {
+                        id: ctx.request.id,
+                        ok: true,
+                        result: Some(json!({ "done": true })),
+                        error: None,
+                    });
+                });
+                LinkMethodOutcome::Deferred
+            }),
+        );
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = handle_client(stream);
+        });
+
+        let mut client = LinkClient::connect_local(port).unwrap();
+        let mut seen = Vec::new();
+        let started = std::time::Instant::now();
+        let value = client
+            .call_with_push("test_deferred_stream", json!({}), |push| {
+                if let Some(seq) = push.payload.get("seq").and_then(|v| v.as_i64()) {
+                    seen.push(seq);
+                }
+            })
+            .unwrap();
+        assert_eq!(seen, vec![0, 1, 2, 3]);
+        assert_eq!(value, json!({ "done": true }));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "deferred reply took {:?}",
+            started.elapsed()
+        );
+        drop(client);
+        let _ = server.join();
+    }
+
+    #[test]
+    fn exec_backend_runs_commands_and_reads_files_like_vps() {
+        use crate::exec::ExecBackend;
+        use crate::remote::link_client::LinkExecBackend;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("probe.txt");
+        std::fs::write(&file, "hello-lan-vps\n").unwrap();
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = handle_client(stream);
+        });
+
+        let client = LinkClient::connect_local(port).unwrap();
+        let backend = LinkExecBackend::new(client, "lan-test");
+        assert!(backend.exists(&file).unwrap());
+        assert!(backend.is_dir(dir.path()).unwrap());
+        assert_eq!(backend.read_to_string(&file).unwrap(), "hello-lan-vps\n");
+        let out = backend
+            .run(&["echo", "ok-from-peer"], Some(dir.path()))
+            .unwrap();
+        assert!(out.success());
+        assert_eq!(out.stdout_trim(), "ok-from-peer");
+        drop(backend);
+        let _ = server.join();
     }
 }

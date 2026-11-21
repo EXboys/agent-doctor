@@ -199,3 +199,26 @@ fn status_glyph(status: ProbeStatus) -> &'static str {
 fn format_check(check: &agent_doctor_core::ProbeCheck) -> String {
     format!("{} — {}", check.title, check.message)
 }
+
+pub fn exec_linked(host: &str, cwd: Option<&str>, command: &[String]) -> Result<()> {
+    use std::io::Write;
+    let script = command.join(" ");
+    if script.trim().is_empty() {
+        bail!("command must not be empty");
+    }
+    let mut client =
+        agent_doctor_core::LinkClient::connect_local(agent_doctor_core::LINK_DAEMON_PORT)?;
+    let res = client.proxy_exec(host.trim(), &script, cwd)?;
+    if !res.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(res.stdout.as_bytes());
+        let _ = std::io::stdout().flush();
+    }
+    if !res.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(res.stderr.as_bytes());
+        let _ = std::io::stderr().flush();
+    }
+    if res.status != 0 {
+        std::process::exit(res.status);
+    }
+    Ok(())
+}

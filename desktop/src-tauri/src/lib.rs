@@ -400,7 +400,7 @@ async fn start_prompt_session_command(
     window: tauri::Window,
     state: State<'_, PromptSessionState>,
     link_sessions: State<'_, LinkSessionState>,
-    linked_index: State<'_, LinkedPromptIndex>,
+    _linked_index: State<'_, LinkedPromptIndex>,
     runtime: String,
     prompt: String,
     cwd: Option<String>,
@@ -426,63 +426,92 @@ async fn start_prompt_session_command(
         .unwrap_or_else(|| owner_label.clone());
 
     if let Some((host_id, remote_project)) = split_linked_workspace(workspace_name.as_deref()) {
+        let cancel = PromptSessionCancel::new();
+        let control = PromptSessionControl::new();
+        state.try_insert(
+            client_key.clone(),
+            ActivePromptRun::new(cancel.clone(), control.clone(), owner_label.clone()),
+        )?;
+
         let link_sessions = (*link_sessions).clone();
-        let linked_index = (*linked_index).clone();
-        let app_for_run = app.clone();
-        let owner = owner_label.clone();
-        let client = client_key.clone();
+        let app_for_emit = app.clone();
+        let emit_target = owner_label.clone();
+        let client_for_events = client_key.clone();
         let runtime_label = runtime.clone();
-        let image_paths: Vec<PathBuf> = image_paths
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .collect();
-        let selected_mcps: Vec<String> = selected_mcps
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        let report = tauri::async_runtime::spawn_blocking(move || {
+        let options = PromptSessionOptions {
+            runtime,
+            prompt,
+            cwd: cwd.map(PathBuf::from),
+            timeout_sec: timeout_sec.unwrap_or(86_400),
+            dangerously_skip_permissions: dangerously_skip_permissions.unwrap_or(false),
+            full_auto: full_auto.unwrap_or(false),
+            resume_thread_id: resume_thread_id
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            selected_mcps: selected_mcps
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            image_paths: image_paths
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .collect(),
+            workspace_name: workspace_name
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            provider_id: provider_id
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            model: model
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            browser_tools_enabled,
+            computer_use_enabled,
+        };
+
+        let run_result = tauri::async_runtime::spawn_blocking(move || {
             run_linked_prompt(
-                &app_for_run,
                 &link_sessions,
-                &linked_index,
-                &owner,
-                &client,
                 &host_id,
                 &remote_project,
-                runtime,
-                prompt,
-                cwd,
-                timeout_sec.unwrap_or(86_400),
-                dangerously_skip_permissions.unwrap_or(false),
-                full_auto.unwrap_or(false),
-                resume_thread_id
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty()),
-                selected_mcps,
-                image_paths,
-                provider_id
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty()),
-                model
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty()),
-                browser_tools_enabled,
-                computer_use_enabled,
+                &options,
+                cancel,
+                control,
+                |event: PromptSessionEvent| {
+                    let event = stamp_client_run(event, &client_for_events);
+                    if let Some(sessions) = app_for_emit.try_state::<PromptSessionState>() {
+                        if let Some(backend_id) = event_session_id(&event) {
+                            sessions.note_backend(backend_id, &client_for_events);
+                        }
+                        sessions.note_event(&client_for_events, &event);
+                    }
+                    let _ =
+                        app_for_emit.emit_to(emit_target.as_str(), "prompt-session-event", &event);
+                },
             )
         })
-        .await
-        .map_err(|e| e.to_string())??;
+        .await;
 
-        let finished = serde_json::json!({
-            "client_run_id": client_key,
-            "status": report.status,
-            "runtime_thread_id": report.runtime_thread_id,
-        });
+        state.release(&client_key);
+
+        let report = run_result.map_err(|e| e.to_string())?;
+        let finished = match &report {
+            Ok(rep) => serde_json::json!({
+                "client_run_id": client_key,
+                "status": rep.status,
+                "runtime_thread_id": rep.runtime_thread_id,
+            }),
+            Err(_) => serde_json::json!({
+                "client_run_id": client_key,
+                "status": "failed",
+                "runtime_thread_id": null,
+            }),
+        };
         let _ = app.emit_to(owner_label.as_str(), "prompt-session-finished", &finished);
         prompt_log::event(
             "run_finished",
@@ -490,10 +519,10 @@ async fn start_prompt_session_command(
                 ("run", client_key.as_str()),
                 ("runtime", runtime_label.as_str()),
                 ("status", finished["status"].as_str().unwrap_or("unknown")),
-                ("via", "linked"),
+                ("via", "local-brain-linked"),
             ],
         );
-        return Ok(report);
+        return report;
     }
 
     let cancel = PromptSessionCancel::new();
@@ -670,9 +699,10 @@ fn replay_prompt_asks_command(
 }
 
 #[tauri::command]
-fn cancel_prompt_session_command(
+async fn cancel_prompt_session_command(
     window: tauri::Window,
     state: State<'_, PromptSessionState>,
+    link_sessions: State<'_, LinkSessionState>,
     linked_index: State<'_, LinkedPromptIndex>,
     client_run_id: Option<String>,
 ) -> Result<bool, String> {
@@ -680,18 +710,26 @@ fn cancel_prompt_session_command(
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or(window.label());
-    if linked_index.is_remote_client(key) {
-        return cancel_linked_prompt(&linked_index, key);
+        .unwrap_or(window.label())
+        .to_string();
+    if linked_index.is_remote_client(&key) {
+        let link_sessions = (*link_sessions).clone();
+        let linked_index = (*linked_index).clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            cancel_linked_prompt(&link_sessions, &linked_index, &key)
+        })
+        .await
+        .map_err(|err| err.to_string())?;
     }
     state.cancel_owned(window.label(), client_run_id)
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-fn resolve_permission_session_command(
+async fn resolve_permission_session_command(
     app: AppHandle,
     state: State<'_, PromptSessionState>,
+    link_sessions: State<'_, LinkSessionState>,
     linked_index: State<'_, LinkedPromptIndex>,
     session_id: String,
     request_id: String,
@@ -699,15 +737,26 @@ fn resolve_permission_session_command(
     text: Option<String>,
     updated_permissions_json: Option<String>,
 ) -> Result<bool, String> {
-    if linked_index.port_for_backend(&session_id).is_some() {
-        let ok = resolve_linked_permission(
-            &linked_index,
-            &session_id,
-            &request_id,
-            allow,
-            text.as_deref(),
-            updated_permissions_json.as_deref(),
-        )?;
+    if linked_index.host_for_backend(&session_id).is_some() {
+        let link_sessions = (*link_sessions).clone();
+        let linked_index = (*linked_index).clone();
+        let sid = session_id.clone();
+        let rid = request_id.clone();
+        let txt = text.clone();
+        let upd = updated_permissions_json.clone();
+        let ok = tauri::async_runtime::spawn_blocking(move || {
+            resolve_linked_permission(
+                &link_sessions,
+                &linked_index,
+                &sid,
+                &rid,
+                allow,
+                txt.as_deref(),
+                upd.as_deref(),
+            )
+        })
+        .await
+        .map_err(|err| err.to_string())??;
         let sent_text = text.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let allowed = sent_text.is_some() || allow;
         // Emit on every ask window; the stream controller filters by chat id.
@@ -859,6 +908,9 @@ fn report_feedback_command(
 }
 
 pub fn run() {
+    if link_remote::maybe_run_remote_exec_cli() {
+        return;
+    }
     // File drags reach the window library before our page. A missing or
     // odd filenames list used to abort the process on the main thread.
     #[cfg(target_os = "macos")]
@@ -885,9 +937,10 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            let link_session_state = LinkSessionState::default();
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
-            app.manage(LinkSessionState::default());
+            app.manage(link_session_state.clone());
             app.manage(LinkedPromptIndex::default());
             if let Ok(dir) = app.path().app_log_dir() {
                 prompt_log::init(dir);
@@ -906,8 +959,9 @@ pub fn run() {
             windows::show_main_window(app.handle());
             tray::setup_tray(app);
             channel_link::spawn(app.handle());
-            // Prompt RPCs must register before the loopback service accepts clients.
+            // Prompt and remote-exec RPCs must register before accepting clients.
             link_prompt::register_prompt_link_methods();
+            link_remote::register_proxy_exec_method(link_session_state);
             // Loopback client service for Paseo-style SSH linking from another computer.
             if let Err(err) = agent_doctor_core::spawn_link_daemon() {
                 eprintln!("[link-daemon] not started: {err:#}");

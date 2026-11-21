@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tungstenite::{client::client as ws_client, Message};
 
 use super::link_client::LinkClient;
-use super::link_daemon::{dispatch_link_text, open_link_socket, serve_link_socket};
+use super::link_daemon::{open_link_socket, AcceptedLinkSocket};
 use super::link_protocol::{LinkHello, LinkResponse, LINK_DAEMON_PORT};
 use super::registry::remote_root_dir;
 
@@ -46,6 +46,16 @@ pub struct NearbyComputer {
 pub struct NearbyAsk {
     pub id: String,
     pub name: String,
+}
+
+/// Saved LAN peer coordinates so later prompts, cancels, and permission
+/// replies can each open their own authenticated WebSocket without blocking on
+/// one shared socket.
+#[derive(Debug, Clone)]
+pub struct NearbyEndpoint {
+    pub peer_id: String,
+    pub addr: String,
+    pub port: u16,
 }
 
 struct SeenPeer {
@@ -348,12 +358,12 @@ fn accept_links(listener: TcpListener) {
 }
 
 fn handle_lan_client(stream: TcpStream, ip: Option<IpAddr>) -> Result<()> {
-    let socket = open_link_socket(stream)?;
+    let mut socket = open_link_socket(stream)?;
     let Some(text) = socket.next_text()? else {
         return Ok(());
     };
     if !nearby_sharing() {
-        return refuse_closed(&socket, &text);
+        return refuse_closed(&mut socket, &text);
     }
     if let Some((id, name)) = lan_hello(&text) {
         if !is_trusted(&id) && !wait_for_allow(&id, &name) {
@@ -366,7 +376,7 @@ fn handle_lan_client(stream: TcpStream, ip: Option<IpAddr>) -> Result<()> {
             return Ok(());
         }
         if !nearby_sharing() {
-            return refuse_closed(&socket, &text);
+            return refuse_closed(&mut socket, &text);
         }
         if let Some(ip) = ip {
             allow_ip(ip);
@@ -377,7 +387,7 @@ fn handle_lan_client(stream: TcpStream, ip: Option<IpAddr>) -> Result<()> {
             result: Some(serde_json::to_value(local_hello())?),
             error: None,
         })?;
-        serve_link_socket(&socket);
+        socket.serve(None);
         return Ok(());
     }
     let allowed = ip.map(ip_allowed).unwrap_or(false);
@@ -390,12 +400,11 @@ fn handle_lan_client(stream: TcpStream, ip: Option<IpAddr>) -> Result<()> {
         });
         return Ok(());
     }
-    dispatch_link_text(&socket, &text)?;
-    serve_link_socket(&socket);
+    socket.serve(Some(&text));
     Ok(())
 }
 
-fn refuse_closed(socket: &super::link_daemon::LinkSocket, text: &str) -> Result<()> {
+fn refuse_closed(socket: &mut AcceptedLinkSocket, text: &str) -> Result<()> {
     let _ = socket.send_response(&LinkResponse {
         id: hello_id(text),
         ok: false,
@@ -494,20 +503,53 @@ fn wait_for_allow(id: &str, name: &str) -> bool {
     allowed
 }
 
-/// Open the other computer and keep that same connection for later work.
-pub fn connect_nearby(id: &str) -> Result<(LinkClient, LinkHello)> {
+/// Open the other computer and keep both the peer coordinates and the first
+/// live connection for later work.
+pub fn connect_nearby(id: &str) -> Result<(NearbyEndpoint, LinkClient, LinkHello)> {
     let peer = list_nearby()
         .into_iter()
         .find(|peer| peer.id == id)
         .context("这台电脑刚才还在，现在看不到了。请让那边的客户端开着。")?;
-    greet(&peer)
+    let endpoint = NearbyEndpoint {
+        peer_id: peer.id,
+        addr: peer.addr,
+        port: peer.port,
+    };
+    let (client, hello) = greet_endpoint(&endpoint, ASK_FOR + Duration::from_secs(5))?;
+    Ok((endpoint, client, hello))
 }
 
-fn greet(peer: &NearbyComputer) -> Result<(LinkClient, LinkHello)> {
-    let addr = format!("{}:{}", peer.addr, peer.port);
-    let stream = TcpStream::connect(addr.as_str()).context("连不上旁边这台电脑")?;
+/// Open an additional authenticated socket to an already-allowed nearby
+/// computer (for a prompt run, cancel, permission reply, or reconnect).
+pub fn open_nearby_client(endpoint: &NearbyEndpoint) -> Result<LinkClient> {
+    let refreshed = list_nearby()
+        .into_iter()
+        .find(|peer| peer.id == endpoint.peer_id)
+        .map(|peer| NearbyEndpoint {
+            peer_id: peer.id,
+            addr: peer.addr,
+            port: peer.port,
+        });
+    let target = refreshed.as_ref().unwrap_or(endpoint);
+    let (client, _) = greet_endpoint(target, Duration::from_secs(8))?;
+    Ok(client)
+}
+
+fn greet_endpoint(
+    endpoint: &NearbyEndpoint,
+    wait_limit: Duration,
+) -> Result<(LinkClient, LinkHello)> {
+    let addr = format!("{}:{}", endpoint.addr, endpoint.port);
+    let stream = TcpStream::connect_timeout(
+        &addr
+            .parse::<SocketAddr>()
+            .with_context(|| format!("地址格式不对：{addr}"))?,
+        Duration::from_secs(5),
+    )
+    .context("连不上旁边这台电脑")?;
     stream.set_nodelay(true).ok();
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let (mut ws, _) = ws_client(format!("ws://{addr}/ws"), stream).context("连上了，但握手失败")?;
     let body = serde_json::json!({
         "id": "1",
@@ -518,7 +560,7 @@ fn greet(peer: &NearbyComputer) -> Result<(LinkClient, LinkHello)> {
         .context("没能发出连接请求")?;
     let started = Instant::now();
     loop {
-        if started.elapsed() > ASK_FOR + Duration::from_secs(5) {
+        if started.elapsed() > wait_limit {
             bail!("那边还没有允许。");
         }
         let msg = match ws.read() {

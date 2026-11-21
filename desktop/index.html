@@ -507,14 +507,10 @@
                 <span id="nearby-share-label">未开放</span>
               </label>
             </div>
-            <article class="remote-host-card remote-share-card" id="nearby-self">
-              <div class="remote-host-head">
-                <div class="ws-manage-main">
-                  <strong data-i18n="remote.shareTitle">这台电脑</strong>
-                  <span id="nearby-self-name" hidden></span>
-                </div>
-              </div>
-              <p id="nearby-share-hint" class="remote-host-note">现在旁边的电脑看不到这台电脑。</p>
+            <article class="remote-self" id="nearby-self">
+              <strong data-i18n="remote.shareTitle">这台电脑</strong>
+              <span id="nearby-self-name" hidden></span>
+              <p id="nearby-share-hint">现在旁边的电脑看不到这台电脑。</p>
             </article>
             <p id="remote-status" class="section-footnote"></p>
             <div id="nearby-ask" class="remote-ask" hidden>
@@ -525,18 +521,18 @@
               </div>
             </div>
             <ul id="nearby-list" class="ws-manage-list" aria-live="polite">
-              <li class="ws-manage-item"><span class="remote-host-note" data-i18n="remote.nearbyEmpty">还没有。另一台要打开客户端，并把开关拨到已开放。如果系统问要不要允许使用网络，点允许。</span></li>
+              <li class="remote-empty" data-i18n="remote.nearbyEmpty">还没有。另一台要打开客户端，并把开关拨到已开放。如果系统问要不要允许使用网络，点允许。</li>
             </ul>
 
           </section>
 
           <section class="widget-section" id="remote-server-section">
-            <div class="section-label section-label-stack">
+            <div class="section-label">
               <div class="section-heading">
                 <h2 data-i18n="remote.serverTitle">服务器</h2>
+                <p class="section-sub" data-i18n="remote.serverHint">没有装客户端的电脑，在这里填地址。</p>
               </div>
             </div>
-            <p class="section-footnote" data-i18n="remote.serverHint">没有装客户端的电脑，在这里填地址。</p>
             <ul id="remote-host-list" class="ws-manage-list" aria-live="polite"></ul>
             <ul id="remote-list" class="ws-manage-list" aria-live="polite" hidden></ul>
             <ul id="remote-checks" class="repair-checks" hidden></ul>

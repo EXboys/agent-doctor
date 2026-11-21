@@ -9,8 +9,8 @@ use anyhow::{bail, Context, Result};
 use tungstenite::{client::client as ws_client, Message, WebSocket};
 
 use super::link_protocol::{
-    methods, LinkDirEntry, LinkDoctorSummary, LinkFilePayload, LinkFixSummary, LinkHello,
-    LinkInitResult, LinkPush, LinkRequest, LinkResponse, LinkWorkspaceRow,
+    methods, LinkDirEntry, LinkDoctorSummary, LinkExecResult, LinkFilePayload, LinkFixSummary,
+    LinkHello, LinkInitResult, LinkPush, LinkRequest, LinkResponse, LinkWorkspaceRow,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -61,6 +61,7 @@ impl LinkClient {
     fn wait_response(
         &mut self,
         id: &str,
+        keepalive_ping: bool,
         mut on_push: impl FnMut(LinkPush),
     ) -> Result<serde_json::Value> {
         loop {
@@ -69,6 +70,17 @@ impl LinkClient {
                 Err(tungstenite::Error::Io(err))
                     if matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
                 {
+                    if keepalive_ping {
+                        // Application-level ping both verifies the peer loop is
+                        // alive and yields the socket lock on older peer builds.
+                        let hb = LinkRequest {
+                            id: "__hb__".into(),
+                            method: methods::PING.into(),
+                            params: serde_json::json!({}),
+                        };
+                        self.send_request(&hb).context("连接已断开")?;
+                        continue;
+                    }
                     bail!("那边没有回应");
                 }
                 Err(err) => return Err(err).context("等待回应失败"),
@@ -114,7 +126,7 @@ impl LinkClient {
             params,
         };
         self.send_request(&req)?;
-        self.wait_response(&id, |_| {})
+        self.wait_response(&id, false, |_| {})
     }
 
     /// Long RPC that may stream push events before the final response.
@@ -130,9 +142,12 @@ impl LinkClient {
             method: method.to_string(),
             params,
         };
-        let _ = self.ws.get_mut().set_read_timeout(None);
+        let _ = self
+            .ws
+            .get_mut()
+            .set_read_timeout(Some(Duration::from_millis(200)));
         self.send_request(&req)?;
-        self.wait_response(&id, on_push)
+        self.wait_response(&id, true, on_push)
     }
 
     /// Fire a short RPC without waiting for an in-flight long call's completion.
@@ -226,6 +241,38 @@ impl LinkClient {
         serde_json::from_value(value).context("整理结果格式不对")
     }
 
+    /// Execute a shell command on the linked computer (same contract as `SshBackend`).
+    pub fn exec(&mut self, script: &str, cwd: Option<&str>) -> Result<LinkExecResult> {
+        let value = self.call_with_push(
+            methods::EXEC,
+            serde_json::json!({
+                "script": script,
+                "cwd": cwd,
+            }),
+            |_| {},
+        )?;
+        serde_json::from_value(value).context("命令返回格式不对")
+    }
+
+    /// Ask the local desktop daemon to run `exec` on an already-connected LAN/SSH host.
+    pub fn proxy_exec(
+        &mut self,
+        host_id: &str,
+        script: &str,
+        cwd: Option<&str>,
+    ) -> Result<LinkExecResult> {
+        let value = self.call_with_push(
+            methods::PROXY_EXEC,
+            serde_json::json!({
+                "host_id": host_id,
+                "script": script,
+                "cwd": cwd,
+            }),
+            |_| {},
+        )?;
+        serde_json::from_value(value).context("远程命令返回格式不对")
+    }
+
     pub fn start_prompt(
         &mut self,
         params: serde_json::Value,
@@ -239,9 +286,8 @@ impl LinkClient {
         })
     }
 
-    pub fn cancel_prompt_on(port: u16, client_run_id: &str) -> Result<bool> {
-        let value = Self::call_nowait_separate(
-            port,
+    pub fn cancel_prompt(&mut self, client_run_id: &str) -> Result<bool> {
+        let value = self.call(
             methods::CANCEL_PROMPT,
             serde_json::json!({ "client_run_id": client_run_id }),
         )?;
@@ -251,16 +297,15 @@ impl LinkClient {
             .unwrap_or(true))
     }
 
-    pub fn resolve_permission_on(
-        port: u16,
+    pub fn resolve_permission(
+        &mut self,
         session_id: &str,
         request_id: &str,
         allow: bool,
         text: Option<&str>,
         updated_permissions_json: Option<&str>,
     ) -> Result<bool> {
-        let value = Self::call_nowait_separate(
-            port,
+        let value = self.call(
             methods::RESOLVE_PERMISSION,
             serde_json::json!({
                 "session_id": session_id,
@@ -271,5 +316,111 @@ impl LinkClient {
             }),
         )?;
         Ok(value.get("ok").and_then(|v| v.as_bool()).unwrap_or(true))
+    }
+
+    pub fn cancel_prompt_on(port: u16, client_run_id: &str) -> Result<bool> {
+        let mut client = Self::connect_local(port)?;
+        client.cancel_prompt(client_run_id)
+    }
+
+    pub fn resolve_permission_on(
+        port: u16,
+        session_id: &str,
+        request_id: &str,
+        allow: bool,
+        text: Option<&str>,
+        updated_permissions_json: Option<&str>,
+    ) -> Result<bool> {
+        let mut client = Self::connect_local(port)?;
+        client.resolve_permission(
+            session_id,
+            request_id,
+            allow,
+            text,
+            updated_permissions_json,
+        )
+    }
+}
+
+/// Treat a passwordless LAN-linked computer identically to an `SshBackend` VPS.
+pub struct LinkExecBackend {
+    client: std::sync::Mutex<LinkClient>,
+    label: String,
+}
+
+impl LinkExecBackend {
+    pub fn new(client: LinkClient, label: impl Into<String>) -> Self {
+        Self {
+            client: std::sync::Mutex::new(client),
+            label: label.into(),
+        }
+    }
+
+    pub fn run_script(
+        &self,
+        script: &str,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<crate::exec::ExecOutput> {
+        let cwd_str = cwd.map(|p| p.display().to_string());
+        let mut guard = self
+            .client
+            .lock()
+            .map_err(|_| anyhow::anyhow!("link client mutex poisoned"))?;
+        let res = guard.exec(script, cwd_str.as_deref())?;
+        Ok(crate::exec::ExecOutput {
+            status: res.status,
+            stdout: res.stdout,
+            stderr: res.stderr,
+        })
+    }
+}
+
+impl crate::exec::ExecBackend for LinkExecBackend {
+    fn run(&self, argv: &[&str], cwd: Option<&std::path::Path>) -> Result<crate::exec::ExecOutput> {
+        let Some((program, args)) = argv.split_first() else {
+            bail!("empty argv");
+        };
+        let mut parts = Vec::with_capacity(1 + args.len());
+        parts.push(crate::exec::shell_quote(program));
+        for arg in args {
+            parts.push(crate::exec::shell_quote(arg));
+        }
+        self.run_script(&parts.join(" "), cwd)
+    }
+
+    fn read_to_string(&self, path: &std::path::Path) -> Result<String> {
+        let quoted = crate::exec::shell_quote(&path.display().to_string());
+        let out = self.run_script(&format!("cat -- {quoted}"), None)?;
+        if !out.success() {
+            bail!(
+                "read {} on '{}': {}",
+                path.display(),
+                self.label,
+                out.stderr.trim()
+            );
+        }
+        Ok(out.stdout)
+    }
+
+    fn exists(&self, path: &std::path::Path) -> Result<bool> {
+        let quoted = crate::exec::shell_quote(&path.display().to_string());
+        Ok(self
+            .run_script(&format!("test -e {quoted}"), None)?
+            .success())
+    }
+
+    fn is_dir(&self, path: &std::path::Path) -> Result<bool> {
+        let quoted = crate::exec::shell_quote(&path.display().to_string());
+        Ok(self
+            .run_script(&format!("test -d {quoted}"), None)?
+            .success())
+    }
+
+    fn home_dir(&self) -> Result<std::path::PathBuf> {
+        let out = self.run_script("printf %s \"$HOME\"", None)?;
+        if !out.success() || out.stdout_trim().is_empty() {
+            bail!("resolve HOME on '{}' failed", self.label);
+        }
+        Ok(std::path::PathBuf::from(out.stdout_trim()))
     }
 }

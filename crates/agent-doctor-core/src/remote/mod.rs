@@ -27,17 +27,19 @@ pub use doctor::{
     RemoteRuntimeDoctorResult,
 };
 pub use lan_link::{
-    connect_nearby, decide_ask, list_nearby, nearby_sharing, pending_asks, set_nearby_sharing,
-    spawn_lan_link, this_computer_name, NearbyAsk, NearbyComputer,
+    connect_nearby, decide_ask, list_nearby, nearby_sharing, open_nearby_client, pending_asks,
+    set_nearby_sharing, spawn_lan_link, this_computer_name, NearbyAsk, NearbyComputer,
+    NearbyEndpoint,
 };
-pub use link_client::LinkClient;
+pub use link_client::{LinkClient, LinkExecBackend};
 pub use link_daemon::{
     is_link_daemon_running, probe_local_daemon, register_link_method, spawn_link_daemon,
     LinkDaemonGuard, LinkMethodHandler, LinkMethodOutcome, LinkRpcContext, LinkSocket,
 };
 pub use link_protocol::{
-    LinkDirEntry, LinkDoctorSummary, LinkFilePayload, LinkFixSummary, LinkHello, LinkImageBlob,
-    LinkInitResult, LinkPush, LinkResponse, LinkWorkspaceRow, LINK_DAEMON_PORT,
+    methods as link_methods, LinkDirEntry, LinkDoctorSummary, LinkExecResult, LinkFilePayload,
+    LinkFixSummary, LinkHello, LinkImageBlob, LinkInitResult, LinkPush, LinkResponse,
+    LinkWorkspaceRow, LINK_DAEMON_PORT,
 };
 pub use link_tunnel::{open_link_tunnel, LinkConnectFailure, LinkTunnel};
 pub use registry::{

@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_doctor_core::{
-    connect_nearby, load_remote_hosts, mark_host_linked, open_link_tunnel, LinkClient,
-    LinkConnectFailure, LinkHello, LinkTunnel,
+    connect_nearby, list_nearby, load_remote_hosts, mark_host_linked, open_link_tunnel,
+    open_nearby_client, LinkClient, LinkConnectFailure, LinkHello, LinkTunnel, NearbyEndpoint,
 };
 use serde::Serialize;
 
@@ -20,7 +20,9 @@ struct LiveLink {
     stop_proxy: Option<Arc<AtomicBool>>,
     hello: LinkHello,
     local_port: u16,
-    /// Nearby computers stay on the connection that already said hello.
+    /// Coordinates for opening fresh authenticated sockets per prompt/cancel/permission.
+    lan_endpoint: Option<NearbyEndpoint>,
+    /// Shared short-RPC socket so workspace/file reads stay fast.
     lan: Option<Arc<Mutex<LinkClient>>>,
 }
 
@@ -128,6 +130,7 @@ impl LinkSessionState {
                             tunnel: Some(tunnel),
                             stop_proxy: None,
                             hello: hello.clone(),
+                            lan_endpoint: None,
                             lan: None,
                         },
                     );
@@ -176,7 +179,7 @@ impl LinkSessionState {
         let host_id = format!("lan-{peer_id}");
         self.disconnect(&host_id);
         match connect_nearby(peer_id) {
-            Ok((client, hello)) => {
+            Ok((endpoint, client, hello)) => {
                 let computer_name = hello.computer_name.clone();
                 if let Ok(mut guard) = self.inner.lock() {
                     guard.insert(
@@ -186,6 +189,7 @@ impl LinkSessionState {
                             tunnel: None,
                             stop_proxy: None,
                             hello,
+                            lan_endpoint: Some(endpoint),
                             lan: Some(Arc::new(Mutex::new(client))),
                         },
                     );
@@ -210,6 +214,14 @@ impl LinkSessionState {
         }
     }
 
+    pub fn lan_endpoint(&self, host_id: &str) -> Option<NearbyEndpoint> {
+        self.inner.lock().ok().and_then(|guard| {
+            guard
+                .get(host_id)
+                .and_then(|live| live.lan_endpoint.clone())
+        })
+    }
+
     pub fn lan_client(&self, host_id: &str) -> Option<Arc<Mutex<LinkClient>>> {
         self.inner
             .lock()
@@ -217,14 +229,76 @@ impl LinkSessionState {
             .and_then(|guard| guard.get(host_id).and_then(|live| live.lan.clone()))
     }
 
+    /// Re-establish a nearby session automatically if this app restarted while
+    /// the peer is still online and already trusts us.
+    fn ensure_lan_session(&self, host_id: &str) -> Option<NearbyEndpoint> {
+        if let Some(ep) = self.lan_endpoint(host_id) {
+            return Some(ep);
+        }
+        let peer_id = host_id.strip_prefix("lan-")?.trim();
+        if peer_id.is_empty() {
+            return None;
+        }
+        let peer = list_nearby().into_iter().find(|p| p.id == peer_id)?;
+        let endpoint = NearbyEndpoint {
+            peer_id: peer.id,
+            addr: peer.addr,
+            port: peer.port,
+        };
+        let mut client = open_nearby_client(&endpoint).ok()?;
+        let hello = client.ping().ok()?;
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.insert(
+                host_id.to_string(),
+                LiveLink {
+                    local_port: 0,
+                    tunnel: None,
+                    stop_proxy: None,
+                    hello,
+                    lan_endpoint: Some(endpoint.clone()),
+                    lan: Some(Arc::new(Mutex::new(client))),
+                },
+            );
+        }
+        Some(endpoint)
+    }
+
+    /// Open a dedicated WebSocket client for an isolated operation such as
+    /// `start_prompt`, `cancel_prompt`, or `resolve_permission`.
+    pub fn open_fresh_client(&self, host_id: &str) -> Result<LinkClient, String> {
+        if let Some(endpoint) = self.ensure_lan_session(host_id) {
+            return open_nearby_client(&endpoint).map_err(|err| format!("{err:#}"));
+        }
+        if let Some(port) = self.local_port(host_id).filter(|port| *port != 0) {
+            return LinkClient::connect_local(port).map_err(|err| format!("{err:#}"));
+        }
+        if host_id.starts_with("lan-") {
+            Err("还没连上这台电脑。先在旁边的电脑里点「在这台电脑上用」。".into())
+        } else {
+            Err("还没连上这台电脑，请先点连接。".into())
+        }
+    }
+
     pub fn with_client<T>(
         &self,
         host_id: &str,
-        f: impl FnOnce(&mut LinkClient) -> anyhow::Result<T>,
+        mut f: impl FnMut(&mut LinkClient) -> anyhow::Result<T>,
     ) -> Result<T, String> {
+        let _ = self.ensure_lan_session(host_id);
         if let Some(lan) = self.lan_client(host_id) {
             let mut client = lan.lock().unwrap_or_else(|err| err.into_inner());
-            return f(&mut client).map_err(|err| format!("{err:#}"));
+            match f(&mut client) {
+                Ok(val) => return Ok(val),
+                Err(first_err) => {
+                    if let Some(endpoint) = self.lan_endpoint(host_id) {
+                        if let Ok(fresh) = open_nearby_client(&endpoint) {
+                            *client = fresh;
+                            return f(&mut client).map_err(|err| format!("{err:#}"));
+                        }
+                    }
+                    return Err(format!("{first_err:#}"));
+                }
+            }
         }
         let port = self
             .local_port(host_id)

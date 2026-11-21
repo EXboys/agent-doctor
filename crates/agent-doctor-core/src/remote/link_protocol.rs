@@ -106,6 +106,13 @@ pub struct LinkImageBlob {
     pub base64: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinkExecResult {
+    pub status: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
 pub mod methods {
     pub const PING: &str = "ping";
     pub const LIST_WORKSPACES: &str = "list_workspaces";
@@ -115,6 +122,8 @@ pub mod methods {
     pub const WRITE_FILE: &str = "write_file";
     pub const WORKSPACE_DOCTOR: &str = "workspace_doctor";
     pub const WORKSPACE_FIX: &str = "workspace_fix";
+    pub const EXEC: &str = "exec";
+    pub const PROXY_EXEC: &str = "proxy_exec";
     pub const START_PROMPT: &str = "start_prompt";
     pub const CANCEL_PROMPT: &str = "cancel_prompt";
     pub const RESOLVE_PERMISSION: &str = "resolve_permission";

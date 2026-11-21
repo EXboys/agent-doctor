@@ -169,6 +169,9 @@ fn version_cli_name(runtime_id: &str) -> Option<&'static str> {
 /// runtime, so it may run any of their allowlisted install/update/version
 /// commands plus the shared `chmod` rule.
 pub fn bash_command_allowed_for_official_agent(command: &str) -> bool {
+    if is_allowed_remote_exec_invocation(command) {
+        return true;
+    }
     [
         "hermes",
         "deepseek-harness",
@@ -178,6 +181,28 @@ pub fn bash_command_allowed_for_official_agent(command: &str) -> bool {
     ]
     .iter()
     .any(|runtime| bash_command_allowed_for_runtime(runtime, command))
+}
+
+/// Allow `<agent-doctor> remote exec <host> <script>` or `<app-exe> --remote-exec <host> <script>`
+/// so the built-in assistant can operate a linked LAN peer the same way SSH operates a VPS.
+fn is_allowed_remote_exec_invocation(command: &str) -> bool {
+    let Some(argv) = split_plain_argv(command.trim()) else {
+        return false;
+    };
+    if argv.len() >= 4 && argv[1] == "--remote-exec" {
+        return is_safe_host_token(&argv[2]);
+    }
+    if argv.len() >= 5 && argv[1] == "remote" && argv[2] == "exec" {
+        return is_safe_host_token(&argv[3]);
+    }
+    false
+}
+
+fn is_safe_host_token(token: &str) -> bool {
+    !token.is_empty()
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
 #[cfg(test)]
@@ -299,6 +324,19 @@ mod tests {
         assert!(!bash_command_allowed_for_runtime(
             "hermes",
             "chmod 600 /srv/.env.backup"
+        ));
+    }
+
+    #[test]
+    fn official_agent_allows_remote_exec_without_shell_chaining() {
+        assert!(bash_command_allowed_for_official_agent(
+            "agent-doctor remote exec lan-abc 'ps aux'"
+        ));
+        assert!(bash_command_allowed_for_official_agent(
+            "'/Applications/Agent Doctor.app/Contents/MacOS/agent-doctor-desktop' --remote-exec 'lan-abc' 'exo --version'"
+        ));
+        assert!(!bash_command_allowed_for_official_agent(
+            "agent-doctor remote exec lan-abc 'ps' && rm -rf /"
         ));
     }
 }
