@@ -41,7 +41,7 @@ const LOCAL_CLUSTER_PROVIDER_ID = "local-cluster";
 
 /** Running models first, then weights already on disk. */
 export function localClusterModelIds(status: ClusterStatus | null): string[] {
-  if (!status || status.backend === "llama_cpp") return [];
+  if (!status) return [];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const id of [...(status.active_models ?? []), ...(status.installed_models ?? [])]) {
@@ -51,6 +51,15 @@ export function localClusterModelIds(status: ClusterStatus | null): string[] {
     out.push(trimmed);
   }
   return out;
+}
+
+/** Local models join the list the chat already had. They never replace it. */
+export function providersWithLocalCluster<T extends { id: string }>(
+  saved: readonly T[],
+  local: T | null,
+): T[] {
+  if (!local) return [...saved];
+  return [...saved.filter((item) => item.id !== local.id), local];
 }
 
 function localClusterProvider(
@@ -420,10 +429,6 @@ export function createModelPickerController(deps: ModelPickerDeps) {
 
   /** Throttled official-account fetch; drives the built-in agent's quota chip and official sign-in gate. */
   async function refreshOfficialStatus(): Promise<void> {
-    if (!isPersonalEdition()) {
-      officialStatus = null;
-      return;
-    }
     if (Date.now() - officialFetchedAt < 15_000) return;
     officialFetchedAt = Date.now();
     try {
@@ -1299,10 +1304,11 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   }
 
   async function refreshWiredProvider(): Promise<void> {
-    if (!isPersonalEdition()) {
-      await refreshTeamLocalModels();
-      return;
-    }
+    await loadSavedAskProviders();
+    if (!isPersonalEdition()) await attachLocalModels();
+  }
+
+  async function loadSavedAskProviders(): Promise<void> {
     try {
       const [status, doc, accounts, official] = await Promise.all([
         getPersonalProviderStatus(),
@@ -1378,25 +1384,25 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     if (deps.getModelMenuOpen()) renderModelMenu();
   }
 
-  async function refreshTeamLocalModels(): Promise<void> {
+  async function attachLocalModels(): Promise<void> {
     try {
       localCluster = await getClusterStatus();
     } catch {
       localCluster = null;
     }
     const models = localClusterModelIds(localCluster);
-    const running = localCluster?.active_models?.find((id) => id.trim())?.trim() || "";
     if (!localCluster || models.length === 0) {
-      deps.setProviders([]);
-      deps.setWiredProvider(null);
       renderModelPickerLabel();
       if (deps.getModelMenuOpen()) renderModelMenu();
       return;
     }
+    const running = localCluster.active_models?.find((id) => id.trim())?.trim() || "";
     const provider = localClusterProvider(localCluster, running || models[0] || "");
-    deps.setProviders([provider]);
-    deps.setWiredProvider(running ? provider : null);
-    if (running) adoptRunningModel(provider, running);
+    deps.setProviders(providersWithLocalCluster(deps.getProviders(), provider));
+    if (running && deps.getWiredProvider()?.id === LOCAL_CLUSTER_PROVIDER_ID) {
+      deps.setWiredProvider(provider);
+      adoptRunningModel(provider, running);
+    }
     renderModelPickerLabel();
     if (deps.getModelMenuOpen()) renderModelMenu();
   }
@@ -1405,10 +1411,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     if (loadingLocalModel) return;
     const session = deps.activeSession();
     const pinned = session?.providerId?.trim() ?? "";
-    if (!pinned) {
-      deps.pinSessionModel(provider, running);
-      return;
-    }
+    // A model that just started on this computer must not take a chat off 官方 or a subscription.
     if (pinned !== LOCAL_CLUSTER_PROVIDER_ID) return;
     const current = session?.model?.trim() ?? "";
     if (!current || current === running) return;
@@ -1436,7 +1439,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       const status = await activateClusterModel(model);
       localCluster = status;
       const provider = localClusterProvider(status, model);
-      deps.setProviders([provider]);
+      deps.setProviders(providersWithLocalCluster(deps.getProviders(), provider));
       deps.setWiredProvider(provider);
       selectSessionModel(provider, model);
       deps.setStatus(t("chat.modelLocalReady"), "ok");

@@ -32,7 +32,9 @@ async function main() {
     accountSupportsModelList,
     loggedAccountCatalogFor,
     nativeProviderId,
+    localClusterModelIds,
     pinSessionAfterFailover,
+    providersWithLocalCluster,
     releaseStalePins,
     runtimeAcceptsProvider,
     sessionKeepsSavedService,
@@ -317,6 +319,22 @@ async function main() {
   assert(failingChat.model === "deepseek-chat", "failover pins the backup model");
   assert(failingChat.runtimeThreadId === null, "old provider's native thread is dropped");
   assert(failingChat.providerTag === "deepseek|api.deepseek.com", "tag tracks the backup host");
+
+  const saved = [{ id: "teamups-official" }, { id: "native-looking" }, { id: "local-cluster" }];
+  const withLocal = providersWithLocalCluster(saved, { id: "local-cluster", model: "qwen" });
+  assert(
+    withLocal.map((item) => item.id).join(",") === "teamups-official,native-looking,local-cluster",
+    "a local model is added beside official and saved services",
+  );
+  assert(withLocal[2]?.model === "qwen", "the live local row replaces the saved one");
+  const kept = providersWithLocalCluster(saved.slice(0, 2), null);
+  assert(kept.length === 2 && kept[0]?.id === "teamups-official", "no local model leaves the old list alone");
+  const llamaIds = localClusterModelIds({
+    backend: "llama_cpp",
+    active_models: ["qwen"],
+    installed_models: ["extra"],
+  } as never);
+  assert(llamaIds.join(",") === "qwen,extra", "a running local model stays selectable");
 
   console.log("model-picker-subscription.test.ts ok");
 }
