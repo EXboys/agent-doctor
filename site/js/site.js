@@ -9,7 +9,7 @@ const SLOT_COPY = {
   },
   "windows-x64": {
     title: "Windows",
-    detail: "64-bit installer. Run it and follow the steps on screen.",
+    detail: "64-bit installer for Windows 10 or newer. Run it and follow the steps on screen.",
     button: "Download for Windows",
   },
   "linux-appimage": {

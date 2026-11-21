@@ -1,3 +1,17 @@
+; Evergreen WebView2's current bootstrapper loads MicrosoftEdgeUpdate.exe,
+; which imports PackageIdFromFullName from KERNEL32.dll. That export does
+; not exist before Windows 8, and Microsoft dropped WebView2 on Windows 7,
+; 8, and 8.1 after runtime 109. This section is included above Tauri's
+; WebView2 section, so the installer stops before that dialog.
+!include WinVer.nsh
+Section "-RequireWindows10"
+  ${IfNot} ${AtLeastWin10}
+    DetailPrint "Agent Doctor needs Windows 10 or newer."
+    MessageBox MB_ICONSTOP "Agent Doctor 需要 Windows 10 或更新的系统，这台电脑装不上。$\r$\n$\r$\nAgent Doctor needs Windows 10 or newer."
+    Abort
+  ${EndIf}
+SectionEnd
+
 ; Kill the bundled CLI before NSIS copies resources. Ignoring a locked
 ; `agent-doctor-cli.exe` leaves Ask/MCP/terminal using a stale or missing binary.
 !macro NSIS_HOOK_PREINSTALL
