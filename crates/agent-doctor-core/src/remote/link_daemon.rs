@@ -528,11 +528,7 @@ fn run_builtin_exec(req: &LinkRequest) -> Result<serde_json::Value> {
         c
     };
     #[cfg(windows)]
-    let mut cmd = {
-        let mut c = crate::exec::command_for_path(std::path::Path::new("cmd"));
-        c.args(["/C", script]);
-        c
-    };
+    let mut cmd = windows_exec_command(script);
 
     cmd.current_dir(&cwd)
         .stdin(Stdio::null())
@@ -579,6 +575,34 @@ fn run_builtin_exec(req: &LinkRequest) -> Result<serde_json::Value> {
         stdout,
         stderr,
     })?)
+}
+
+/// Scripts sent to a linked computer use the same POSIX quoting as a VPS
+/// (`'echo' 'ok'`). `cmd.exe` keeps those quotes as part of the program name,
+/// so `'echo'` is not the `echo` builtin and the command fails. Git for
+/// Windows (and the Windows CI image) provide `sh.exe`, which runs that
+/// script unchanged.
+#[cfg(windows)]
+fn windows_exec_command(script: &str) -> std::process::Command {
+    if let Some(sh) = windows_posix_shell() {
+        let mut cmd = crate::exec::command_for_path(&sh);
+        cmd.args(["-c", script]);
+        cmd.env("MSYS_NO_PATHCONV", "1");
+        cmd.env("MSYS2_ARG_CONV_EXCL", "*");
+        return cmd;
+    }
+    let mut cmd = crate::exec::command_for_path(std::path::Path::new("cmd"));
+    cmd.args(["/C", script]);
+    cmd
+}
+
+#[cfg(windows)]
+fn windows_posix_shell() -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths).find_map(|dir| {
+        let candidate = dir.join("sh.exe");
+        candidate.is_file().then_some(candidate)
+    })
 }
 
 #[cfg(unix)]
@@ -732,7 +756,7 @@ mod tests {
         let out = backend
             .run(&["echo", "ok-from-peer"], Some(dir.path()))
             .unwrap();
-        assert!(out.success());
+        assert!(out.success(), "status {} stderr {}", out.status, out.stderr);
         assert_eq!(out.stdout_trim(), "ok-from-peer");
         drop(backend);
         let _ = server.join();
