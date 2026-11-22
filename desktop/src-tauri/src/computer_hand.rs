@@ -667,11 +667,22 @@ fn capture_png(app: &str) -> Result<proto::Shot> {
 }
 
 /// Every display for the chat screenshot picker, one overlay window each.
+/// Capture keeps CG coordinates, but the picker is placed in the space tauri
+/// positions windows in: x matches CG, y is measured from the top of the
+/// global desktop box, so a screen parked above the main one shifts every y
+/// down by its height. Without that shift the picker for such a screen is
+/// placed past the top of the desktop and never seen.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
     #[cfg(target_os = "macos")]
     {
-        active_displays()
+        let displays = active_displays();
+        let top_shift = displays
+            .iter()
+            .map(|display| display.origin_y)
+            .fold(f64::MAX, f64::min)
+            .min(0.0);
+        displays
             .iter()
             .map(|display| proto::DisplayBox {
                 id: display.id,
@@ -679,6 +690,8 @@ pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
                 origin_y: display.origin_y,
                 width: display.width,
                 height: display.height,
+                place_x: display.origin_x,
+                place_y: display.origin_y - top_shift,
                 scale: display_scale(display.id),
             })
             .collect()

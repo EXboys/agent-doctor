@@ -43,7 +43,11 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
     let initiator = window.label().to_string();
     let mut overlays = Vec::new();
     for (idx, display) in displays.iter().enumerate() {
-        let shot = crate::computer_hand::capture_display_full(*display)?;
+        // One bad display must not take the whole picker down; skip it and
+        // keep the rest.
+        let Ok(shot) = crate::computer_hand::capture_display_full(*display) else {
+            continue;
+        };
         let label = format!("screenshot-{idx}");
         let (x, y, width, height) = logical_frame(display);
         let url = WebviewUrl::App(format!("screenshot.html#shot={shot}").into());
@@ -59,25 +63,31 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
             .visible_on_all_workspaces(true)
             .skip_taskbar(true)
             .shadow(false)
+            .accept_first_mouse(true)
             .visible(false)
             .build();
-        match built {
-            Ok(_) => overlays.push(Overlay {
-                label,
-                display: *display,
-                shot,
-            }),
-            Err(err) => {
-                close_overlays(
-                    &app,
-                    Some(RegionSession {
-                        initiator: initiator.clone(),
-                        overlays,
-                    }),
-                );
-                return Err(err.to_string());
-            }
+        #[cfg_attr(not(windows), allow(unused_variables))]
+        let Ok(win) = built
+        else {
+            continue;
+        };
+        // Windows: the builder converts logical through whichever scale the
+        // window starts on, so re-pin with raw pixels once it exists.
+        #[cfg(windows)]
+        {
+            let _ = win.set_position(tauri::PhysicalPosition::new(
+                display.origin_x.round() as i32,
+                display.origin_y.round() as i32,
+            ));
         }
+        overlays.push(Overlay {
+            label,
+            display: *display,
+            shot,
+        });
+    }
+    if overlays.is_empty() {
+        return Err("could not capture any display".to_string());
     }
     *REGION.lock().unwrap_or_else(|err| err.into_inner()) = Some(RegionSession {
         initiator,
@@ -198,8 +208,8 @@ fn logical_frame(display: &DisplayBox) -> (f64, f64, f64, f64) {
             1.0
         };
         (
-            display.origin_x / scale,
-            display.origin_y / scale,
+            display.place_x,
+            display.place_y,
             display.width / scale,
             display.height / scale,
         )
@@ -207,8 +217,8 @@ fn logical_frame(display: &DisplayBox) -> (f64, f64, f64, f64) {
     #[cfg(not(windows))]
     {
         (
-            display.origin_x,
-            display.origin_y,
+            display.place_x,
+            display.place_y,
             display.width,
             display.height,
         )

@@ -180,6 +180,9 @@ pub(crate) struct Shot {
 /// One display for the chat screenshot picker. Origins and sizes are in the
 /// unit that platform captures in — macOS global points, Windows
 /// virtual-screen pixels — and `scale` maps logical points onto those units.
+/// `place_*` is where the picker window goes, in the logical coordinates
+/// tauri positions windows in, which on macOS drift from the capture space
+/// once a screen sits above the main one.
 #[derive(Clone, Copy)]
 pub(crate) struct DisplayBox {
     pub(crate) id: u32,
@@ -187,6 +190,8 @@ pub(crate) struct DisplayBox {
     pub(crate) origin_y: f64,
     pub(crate) width: f64,
     pub(crate) height: f64,
+    pub(crate) place_x: f64,
+    pub(crate) place_y: f64,
     /// Only Windows converts between points and pixels; macOS points are
     /// already logical, so this reads as unused there.
     #[cfg_attr(not(windows), allow(dead_code))]

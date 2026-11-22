@@ -330,6 +330,8 @@ pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
                 origin_y: desk.origin_y as f64,
                 width: desk.width as f64,
                 height: desk.height as f64,
+                place_x: desk.origin_x as f64 / scale,
+                place_y: desk.origin_y as f64 / scale,
                 scale,
             }
         })
