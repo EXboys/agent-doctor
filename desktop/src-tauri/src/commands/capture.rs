@@ -160,17 +160,20 @@ pub fn cancel_region_capture_command(app: AppHandle) -> Result<(), String> {
 }
 
 /// Cut the picked rect out of the frozen shot. The rect arrives in logical
-/// points from the picker; the shot is stored in this platform's capture unit.
+/// points from the picker; the shot is stored in this platform's capture
+/// unit. The scale comes from the shot itself — the reported display scale
+/// has been wrong on modern macOS, and points against a 2x image would crop
+/// only the top-left quarter of the selection.
 #[cfg(any(target_os = "macos", windows))]
 fn crop_shot(overlay: &Overlay, x: f64, y: f64, width: f64, height: f64) -> Result<String, String> {
-    let scale = if overlay.display.scale > 0.0 {
-        overlay.display.scale
+    let image = image::open(&overlay.shot)
+        .map_err(|err| format!("could not read the frozen shot: {err}"))?;
+    let scale = if overlay.display.width > 0.0 {
+        (image.width() as f64 / overlay.display.width).max(1.0)
     } else {
         1.0
     };
     let pixel = |value: f64| (value * scale).round() as i64;
-    let image = image::open(&overlay.shot)
-        .map_err(|err| format!("could not read the frozen shot: {err}"))?;
     let left = pixel(x).clamp(0, i64::from(image.width()) - 1);
     let top = pixel(y).clamp(0, i64::from(image.height()) - 1);
     let crop_width = pixel(width).clamp(1, i64::from(image.width()) - left);
