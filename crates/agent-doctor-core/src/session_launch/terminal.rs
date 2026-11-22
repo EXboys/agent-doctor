@@ -10,7 +10,7 @@ use std::path::Path;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::path::PathBuf;
 use std::process::Command;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 use std::process::Stdio;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::time::{SystemTime, UNIX_EPOCH};
