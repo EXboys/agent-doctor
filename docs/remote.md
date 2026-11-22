@@ -27,6 +27,20 @@ The desktop app starts the loopback service automatically. That port stays on
 localhost. Same-network use goes through the LAN port above; a server without
 the app is still reached by SSH.
 
+## Same account, other networks
+
+Computers on one account already tell the site their name. 分享到外网 stays off
+until that computer turns it on. While it is on, the site remembers the public
+address it sees on the connection, plus the SSH user and public key. Files and
+chat do not pass through the site.
+
+The other computer uses the LAN beacon when that beacon names the same account
+computer. Otherwise it opens SSH to the published public address, port 22, and
+forwards to the loopback client on `127.0.0.1:18765`. The app does not open the
+home router. If port 22 is not forwarded, the address is visible and the
+connection still fails. A changed public address is reported again on the next
+hello. The client port stays on loopback.
+
 Asking agents on the remote computer streams over the same tunnel: events and
 permission cards appear on this computer; the agent process runs on the other
 one. Projects show a host badge in the sidebar.

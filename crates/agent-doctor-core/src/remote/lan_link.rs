@@ -30,6 +30,9 @@ struct Beacon {
     id: String,
     name: String,
     port: u16,
+    /// Account computer id. Omitted on the v1 packet so older apps still see us.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    account: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,6 +42,9 @@ pub struct NearbyComputer {
     pub name: String,
     pub addr: String,
     pub port: u16,
+    /// Account computer id, when the beacon named one. Empty for older apps.
+    #[serde(default)]
+    pub account: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +69,7 @@ struct SeenPeer {
     addr: IpAddr,
     port: u16,
     seen: Instant,
+    account: String,
 }
 
 struct AskWait {
@@ -241,14 +248,28 @@ fn announce(socket: UdpSocket) {
     let dest = SocketAddr::from((Ipv4Addr::BROADCAST, DISCOVERY_PORT));
     loop {
         if nearby_sharing() {
-            let beacon = Beacon {
-                v: 1,
-                id: self_id(),
-                name: computer_name(),
-                port: LINK_PORT,
-            };
-            if let Ok(bytes) = serde_json::to_vec(&beacon) {
-                let _ = socket.send_to(&bytes, dest);
+            let id = self_id();
+            let name = computer_name();
+            let account = super::account_link::saved_account_client_id();
+            for beacon in [
+                Beacon {
+                    v: 1,
+                    id: id.clone(),
+                    name: name.clone(),
+                    port: LINK_PORT,
+                    account: String::new(),
+                },
+                Beacon {
+                    v: 2,
+                    id,
+                    name,
+                    port: LINK_PORT,
+                    account,
+                },
+            ] {
+                if let Ok(bytes) = serde_json::to_vec(&beacon) {
+                    let _ = socket.send_to(&bytes, dest);
+                }
             }
         }
         thread::sleep(Duration::from_secs(2));
@@ -264,20 +285,37 @@ fn collect(socket: UdpSocket) {
         let Ok(beacon) = serde_json::from_slice::<Beacon>(&buf[..n]) else {
             continue;
         };
-        if beacon.v != 1 || beacon.id.is_empty() || beacon.id == self_id() {
+        if (beacon.v != 1 && beacon.v != 2) || beacon.id.is_empty() || beacon.id == self_id() {
             continue;
         }
         if let Ok(mut guard) = PEERS.lock() {
             let peers = guard.get_or_insert_with(HashMap::new);
-            peers.insert(
-                beacon.id,
-                SeenPeer {
-                    name: beacon.name,
-                    addr: from.ip(),
-                    port: beacon.port,
-                    seen: Instant::now(),
-                },
-            );
+            let account = beacon.account.trim().to_string();
+            match peers.get_mut(&beacon.id) {
+                Some(peer) => {
+                    peer.addr = from.ip();
+                    peer.port = beacon.port;
+                    peer.seen = Instant::now();
+                    if !beacon.name.trim().is_empty() {
+                        peer.name = beacon.name;
+                    }
+                    if !account.is_empty() {
+                        peer.account = account;
+                    }
+                }
+                None => {
+                    peers.insert(
+                        beacon.id,
+                        SeenPeer {
+                            name: beacon.name,
+                            addr: from.ip(),
+                            port: beacon.port,
+                            seen: Instant::now(),
+                            account,
+                        },
+                    );
+                }
+            }
         }
     }
 }
@@ -302,6 +340,7 @@ pub fn list_nearby() -> Vec<NearbyComputer> {
             },
             addr: peer.addr.to_string(),
             port: peer.port,
+            account: peer.account.clone(),
         })
         .collect();
     rows.sort_by(|a, b| a.name.cmp(&b.name));
@@ -435,7 +474,7 @@ fn lan_hello(text: &str) -> Option<(String, String)> {
     let name = params
         .get("name")
         .and_then(|name| name.as_str())
-        .unwrap_or("旁边的电脑")
+        .unwrap_or("另一台电脑")
         .to_string();
     Some((id, name))
 }

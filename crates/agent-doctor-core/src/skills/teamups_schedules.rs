@@ -35,6 +35,21 @@ pub struct TeamupsComputer {
     pub name: String,
     pub os: String,
     pub default: bool,
+    /// Address on that computer's own LAN. Empty when the site did not send one.
+    #[serde(default, rename = "localIp", skip_serializing_if = "String::is_empty")]
+    pub local_ip: String,
+    /// That computer turned on 分享到外网.
+    #[serde(default, rename = "wan", skip_serializing_if = "std::ops::Not::not")]
+    pub wan: bool,
+    /// Public address, only when `wan` is on and the address is reachable from another network.
+    #[serde(default, rename = "publicIp", skip_serializing_if = "String::is_empty")]
+    pub public_ip: String,
+    /// SSH user on that computer. Present only while it is shared to the internet.
+    #[serde(default, rename = "sshUser", skip_serializing_if = "String::is_empty")]
+    pub ssh_user: String,
+    /// SSH public key. Present whenever that computer has published one.
+    #[serde(default, rename = "sshPub", skip_serializing_if = "String::is_empty")]
+    pub ssh_pub: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +296,15 @@ pub fn teamups_run_schedule(id: &str) -> Result<TeamupsRunOutcome> {
     })
 }
 
+fn text_field(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
 /// 账号的电脑列表，用来把 client_id 翻译成名字。
 pub fn teamups_computers() -> Result<Vec<TeamupsComputer>> {
     let body = request_json(reqwest::Method::GET, "/api/v1/account/computers", None)?;
@@ -312,6 +336,11 @@ pub fn teamups_computers() -> Result<Vec<TeamupsComputer>> {
                     .get("default")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                local_ip: text_field(value, "localIp"),
+                wan: value.get("wan").and_then(Value::as_bool).unwrap_or(false),
+                public_ip: text_field(value, "publicIp"),
+                ssh_user: text_field(value, "sshUser"),
+                ssh_pub: text_field(value, "sshPub"),
             })
         })
         .collect())

@@ -5,6 +5,7 @@
 //! - **Linked client** (Paseo-style): SSH tunnel to the other computer's loopback
 //!   client service for projects, files, doctor, and fix.
 
+mod account_link;
 mod bootstrap;
 mod doctor;
 mod lan_link;
@@ -17,6 +18,12 @@ mod openssh_config;
 mod registry;
 mod ssh;
 
+pub use account_link::{
+    account_host_id, account_identity_file, account_ssh_public_key, account_ssh_user,
+    choose_account_route, is_public_ipv4, is_ssh_ed25519_pub, is_ssh_user, public_ssh_entry,
+    saved_account_client_id, set_wan_share, sync_account_authorized_keys, wan_share_enabled,
+    AccountRoute,
+};
 pub use bootstrap::{
     bootstrap_and_add_host, build_install_pubkey_remote_script, generate_ed25519_key,
     install_pubkey_with_password, verify_key_login, BootstrapHostOptions,

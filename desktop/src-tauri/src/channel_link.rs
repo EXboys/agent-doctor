@@ -144,6 +144,21 @@ pub fn spawn(app: &AppHandle) {
     });
 }
 
+/// Tell the site this computer's internet-share switch changed, without
+/// replaying conversations. If the line is down, the next hello carries it.
+pub fn refresh_share(app: &AppHandle) {
+    let frame = agent_doctor_core::teamups_channel_presence();
+    if let Some(outbound) = app.try_state::<Outbound>() {
+        let guard = outbound.0.lock().expect("channel");
+        if let Some(tx) = guard.as_ref() {
+            if tx.send(frame).is_ok() {
+                return;
+            }
+        }
+    }
+    poke(app);
+}
+
 /// Login, logout, or the on/off switch changed. Wakes the loop without opening a socket.
 pub fn poke(app: &AppHandle) {
     if let Some(wake) = app.try_state::<Wake>() {

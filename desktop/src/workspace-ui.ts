@@ -36,6 +36,10 @@ import {
   pendingNearbyAsks,
   answerNearbyAsk,
   useNearbyComputer,
+  setWanShare,
+  accountLinkStatus,
+  connectAccountComputer,
+  type AccountLinkStatus,
   listLinkedHostStatus,
   linkedListWorkspaces,
   linkedWorkspaceDoctor,
@@ -60,6 +64,12 @@ const nearbyShareInputEl = document.querySelector<HTMLInputElement>("#nearby-sha
 const nearbyShareLabelEl = document.querySelector<HTMLElement>("#nearby-share-label")!;
 const nearbyShareHintEl = document.querySelector<HTMLElement>("#nearby-share-hint")!;
 let nearbyShareEpoch = 0;
+const wanShareEl = document.querySelector<HTMLLabelElement>("#wan-share")!;
+const wanShareInputEl = document.querySelector<HTMLInputElement>("#wan-share-input")!;
+const wanShareLabelEl = document.querySelector<HTMLElement>("#wan-share-label")!;
+const wanShareHintEl = document.querySelector<HTMLElement>("#wan-share-hint")!;
+const wanListEl = document.querySelector<HTMLUListElement>("#wan-list")!;
+let wanShareEpoch = 0;
 const nearbyAskEl = document.querySelector<HTMLElement>("#nearby-ask")!;
 const nearbyAskTextEl = document.querySelector<HTMLElement>("#nearby-ask-text")!;
 const nearbyAllowEl = document.querySelector<HTMLButtonElement>("#nearby-allow")!;
@@ -465,7 +475,7 @@ function renderNearby(peers: Array<{ id: string; name: string }>): void {
 function renderNearbyAsk(ask: { id: string; name: string } | undefined): void {
   if (ask && !answeredAskIds.has(ask.id)) {
     pendingAskId = ask.id;
-    nearbyAskTextEl.textContent = t("remote.askText", { name: ask.name || "旁边的电脑" });
+    nearbyAskTextEl.textContent = t("remote.askText", { name: ask.name || "另一台电脑" });
     nearbyAskEl.classList.remove("is-result");
     nearbyAskEl.hidden = false;
     return;
@@ -511,6 +521,186 @@ function paintNearbyShare(enabled: boolean): void {
   nearbyShareEl.classList.toggle("is-on", enabled);
   nearbyShareLabelEl.textContent = t(enabled ? "remote.shareOpen" : "remote.shareClosed");
   nearbyShareHintEl.textContent = t(enabled ? "remote.shareHint" : "remote.shareHintOff");
+}
+
+type WanView = NearbyView;
+const wanViews = new Map<string, WanView>();
+const wanFails = new Map<string, number>();
+const wanBusy = new Set<string>();
+let lastWanComputers: Array<{ id: string; name: string; connected: boolean }> = [];
+
+function accountHostId(id: string): string {
+  return id.startsWith("acct-") ? id : `acct-${id}`;
+}
+
+function wanFailureMessage(kind: string): string {
+  if (kind === "client") return t("remote.wanClient");
+  if (kind === "lan") return t("remote.wanSameLan");
+  if (kind === "off") return t("remote.wanUnavailable");
+  if (kind === "ssh") return t("remote.wanFailed");
+  return t("remote.wanFailed");
+}
+
+function renderWan(): void {
+  if (lastWanComputers.length === 0) {
+    wanListEl.innerHTML = `<li class="remote-empty">${escapeHtml(t("remote.wanEmpty"))}</li>`;
+    return;
+  }
+  wanListEl.innerHTML = lastWanComputers
+    .map((computer) => {
+      const view = wanViews.get(computer.id);
+      const note = view?.message
+        ? `<p class="remote-peer-note">${escapeHtml(view.message)}</p>`
+        : "";
+      const projects = (view?.projects ?? [])
+        .map(
+          (project) =>
+            `<p class="remote-peer-note">${escapeHtml(project.name)} · ${escapeHtml(project.path)}</p>`,
+        )
+        .join("");
+      const retry = view?.phase === "failed";
+      const button =
+        !view || retry
+          ? `<button type="button" class="btn-primary btn-compact remote-peer-action" data-wan-use="${escapeHtml(computer.id)}">${escapeHtml(t(retry ? "remote.wanRetry" : "remote.wanUse"))}</button>`
+          : "";
+      return `
+        <li class="remote-peer">
+          <div class="remote-peer-body">
+            <strong>${escapeHtml(computer.name)}</strong>
+            ${note}
+            ${projects}
+          </div>
+          ${button}
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function paintWanShare(status: AccountLinkStatus): void {
+  wanShareInputEl.checked = status.sharing;
+  wanShareInputEl.setAttribute("aria-checked", status.sharing ? "true" : "false");
+  wanShareEl.classList.toggle("is-on", status.sharing);
+  wanShareLabelEl.textContent = t(status.sharing ? "remote.wanOn" : "remote.wanOff");
+  let hint = status.sharing
+    ? status.publicIp
+      ? t("remote.wanAddress", { ip: status.publicIp })
+      : t("remote.wanAddressWait")
+    : t("remote.wanHintOff");
+  if (status.sharing && !status.keysReady) {
+    hint = `${hint} ${t("remote.wanKeys")}`;
+  }
+  wanShareHintEl.textContent = hint;
+  if (!status.signedIn) {
+    wanListEl.innerHTML = `<li class="remote-empty">${escapeHtml(t("remote.wanNeedSignIn"))}</li>`;
+    return;
+  }
+  lastWanComputers = status.computers;
+  for (const computer of status.computers) {
+    if (!computer.connected) continue;
+    const view = wanViews.get(computer.id);
+    if (view?.phase === "waiting") continue;
+    if (view?.phase === "ready") continue;
+    wanViews.set(computer.id, {
+      phase: "ready",
+      name: computer.name,
+      message: t("remote.wanReady", { name: computer.name }),
+      projects: [],
+    });
+    void loadWanProjects(computer.id, computer.name);
+  }
+  renderWan();
+}
+
+async function loadWanProjects(id: string, name: string): Promise<void> {
+  const view = wanViews.get(id);
+  if (!view || view.phase !== "ready") return;
+  try {
+    const rows = await linkedListWorkspaces({ hostId: accountHostId(id) });
+    const current = wanViews.get(id);
+    if (!current || current.phase !== "ready") return;
+    current.projects = rows.map((row) => ({
+      name: row.title?.trim() || row.name,
+      path: row.path,
+    }));
+    current.message =
+      rows.length > 0 ? t("remote.wanReady", { name }) : t("remote.wanNoProjects", { name });
+  } catch {
+    const current = wanViews.get(id);
+    if (!current || current.phase !== "ready") return;
+    current.message = t("remote.wanProjectsFailed", { name });
+  }
+  renderWan();
+}
+
+async function connectWan(id: string, name: string): Promise<void> {
+  if (wanBusy.has(id)) return;
+  wanBusy.add(id);
+  wanViews.set(id, {
+    phase: "waiting",
+    name,
+    message: t("remote.wanConnecting"),
+    projects: [],
+  });
+  renderWan();
+  try {
+    const report = await connectAccountComputer({ id });
+    if (!report.ok) {
+      wanFails.set(id, (wanFails.get(id) ?? 0) + 1);
+      wanViews.set(id, {
+        phase: "failed",
+        name,
+        message: wanFailureMessage(report.kind),
+        projects: [],
+      });
+      renderWan();
+      return;
+    }
+    wanFails.delete(id);
+    const connectedName = report.computerName || name;
+    wanViews.set(id, {
+      phase: "ready",
+      name: connectedName,
+      message: t("remote.wanReady", { name: connectedName }),
+      projects: [],
+    });
+    renderWan();
+    await loadWanProjects(id, connectedName);
+  } catch {
+    wanFails.set(id, (wanFails.get(id) ?? 0) + 1);
+    wanViews.set(id, {
+      phase: "failed",
+      name,
+      message: t("remote.wanFailed"),
+      projects: [],
+    });
+    renderWan();
+  } finally {
+    wanBusy.delete(id);
+  }
+}
+
+async function refreshWan(): Promise<void> {
+  const epoch = wanShareEpoch;
+  try {
+    const status = await accountLinkStatus();
+    if (epoch !== wanShareEpoch) return;
+    paintWanShare(status);
+    if (!status.signedIn) return;
+    const ids = new Set(status.computers.map((computer) => computer.id));
+    for (const id of [...wanFails.keys()]) {
+      if (!ids.has(id)) wanFails.delete(id);
+    }
+    for (const computer of status.computers) {
+      if (computer.connected || wanBusy.has(computer.id)) continue;
+      if ((wanFails.get(computer.id) ?? 0) >= 2) continue;
+      const view = wanViews.get(computer.id);
+      if (view?.phase === "ready" || view?.phase === "waiting") continue;
+      void connectWan(computer.id, computer.name);
+    }
+  } catch {
+    // A missed read leaves the list where the last one put it.
+  }
 }
 
 async function adoptLiveNearby(): Promise<void> {
@@ -921,6 +1111,33 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     }
   });
 
+  wanShareInputEl.addEventListener("change", () => {
+    const next = wanShareInputEl.checked;
+    const epoch = ++wanShareEpoch;
+    wanShareInputEl.setAttribute("aria-checked", next ? "true" : "false");
+    wanShareEl.classList.toggle("is-on", next);
+    wanShareLabelEl.textContent = t(next ? "remote.wanOn" : "remote.wanOff");
+    wanShareHintEl.textContent = t(next ? "remote.wanAddressWait" : "remote.wanHintOff");
+    void setWanShare({ enabled: next })
+      .then(() => {
+        if (epoch === wanShareEpoch) void refreshWan();
+      })
+      .catch(() => {
+        if (epoch !== wanShareEpoch) return;
+        wanShareInputEl.checked = !next;
+        wanShareHintEl.textContent = t("remote.wanShareFailed");
+      });
+  });
+
+  wanListEl.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-wan-use]");
+    if (!button?.dataset.wanUse) return;
+    const id = button.dataset.wanUse;
+    wanFails.delete(id);
+    const name = button.closest("li")?.querySelector("strong")?.textContent?.trim() || "";
+    void connectWan(id, name);
+  });
+
   nearbyShareInputEl.addEventListener("change", () => {
     const next = nearbyShareInputEl.checked;
     const epoch = ++nearbyShareEpoch;
@@ -970,8 +1187,10 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
   });
 
   void refreshNearby();
+  void refreshWan();
   window.setInterval(() => {
     void refreshNearby();
+    void refreshWan();
   }, 3000);
 
   remoteHostListEl.addEventListener("click", (event) => {

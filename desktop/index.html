@@ -487,7 +487,7 @@
           <section class="widget-section">
             <div class="section-label section-label-stack">
               <div class="section-heading">
-                <h2 data-i18n="workspaces.manageTitle">项目</h2>
+                <h2 data-i18n="workspaces.manageTitle">本机项目</h2>
               </div>
               <button id="workspace-register" type="button" class="btn-primary btn-compact" data-i18n="workspaces.register">添加项目</button>
             </div>
@@ -499,7 +499,7 @@
           <section class="widget-section" id="remote-section">
             <div class="section-label section-label-stack">
               <div class="section-heading">
-                <h2 data-i18n="remote.title">旁边的电脑</h2>
+                <h2 data-i18n="remote.title">客户端互联</h2>
               </div>
               <label id="nearby-share" class="remote-share-switch">
                 <input id="nearby-share-input" type="checkbox" role="switch" aria-checked="false" />
@@ -510,7 +510,7 @@
             <article class="remote-self" id="nearby-self">
               <strong data-i18n="remote.shareTitle">这台电脑</strong>
               <span id="nearby-self-name" hidden></span>
-              <p id="nearby-share-hint">现在旁边的电脑看不到这台电脑。</p>
+              <p id="nearby-share-hint">现在别的客户端看不到这台电脑。</p>
             </article>
             <p id="remote-status" class="section-footnote"></p>
             <div id="nearby-ask" class="remote-ask" hidden>
@@ -523,6 +523,23 @@
             <ul id="nearby-list" class="ws-manage-list" aria-live="polite">
               <li class="remote-empty" data-i18n="remote.nearbyEmpty">还没有。另一台要打开客户端，并把开关拨到已开放。如果系统问要不要允许使用网络，点允许。</li>
             </ul>
+
+            <div class="remote-wan" id="remote-wan">
+              <div class="section-label section-label-stack">
+                <div class="section-heading">
+                  <h3 data-i18n="remote.wanTitle">别的网络</h3>
+                </div>
+                <label id="wan-share" class="remote-share-switch">
+                  <input id="wan-share-input" type="checkbox" role="switch" aria-checked="false" />
+                  <i aria-hidden="true"></i>
+                  <span id="wan-share-label">未分享</span>
+                </label>
+              </div>
+              <p id="wan-share-hint" class="section-footnote">关掉时，别的网络上的电脑连不到这台。</p>
+              <ul id="wan-list" class="ws-manage-list" aria-live="polite">
+                <li class="remote-empty">同一账号下，还没有要从外网连接的电脑。在同一个网络时，用上面的列表。</li>
+              </ul>
+            </div>
 
           </section>
 

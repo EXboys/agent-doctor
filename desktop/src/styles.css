@@ -1271,6 +1271,20 @@ body.is-diagnose-open .diagnose-detail {
   display: none;
 }
 
+.remote-wan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.remote-wan h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
 .remote-form {
   display: grid;
   gap: 8px;

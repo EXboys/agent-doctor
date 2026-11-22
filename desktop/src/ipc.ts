@@ -1023,6 +1023,34 @@ export function useNearbyComputer(args: {
   return invoke("use_nearby_computer_command", args);
 }
 
+export type AccountComputerRow = {
+  id: string;
+  name: string;
+  connected: boolean;
+};
+
+export type AccountLinkStatus = {
+  signedIn: boolean;
+  sharing: boolean;
+  publicIp: string;
+  keysReady: boolean;
+  computers: AccountComputerRow[];
+};
+
+export function setWanShare(args: { enabled: boolean }): Promise<void> {
+  return invoke("set_wan_share_command", args);
+}
+
+export function accountLinkStatus(): Promise<AccountLinkStatus> {
+  return invoke("account_link_status_command");
+}
+
+export function connectAccountComputer(args: {
+  id: string;
+}): Promise<import("./types").LinkConnectReport> {
+  return invoke("connect_account_computer_command", args);
+}
+
 export function connectLinkedHost(args: { id: string }): Promise<import("./types").LinkConnectReport> {
   return invoke("connect_linked_host_command", args);
 }

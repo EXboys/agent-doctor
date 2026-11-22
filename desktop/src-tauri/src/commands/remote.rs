@@ -1,9 +1,12 @@
 use agent_doctor_core::{
-    add_host, add_project, bootstrap_and_add_host, load_remote_hosts, probe_remote_host,
-    publish_managed_logins, remove_host, remove_project, run_remote_doctor, BootstrapHostOptions,
-    LinkDirEntry, LinkDoctorSummary, LinkFilePayload, LinkFixSummary, LinkHello, LinkInitResult,
-    LinkWorkspaceRow, RemoteDoctorOptions, RemoteDoctorReport, RemoteHostProbeReport,
-    RemoteHostsDocument,
+    account_host_id, account_ssh_public_key, add_host, add_project, bootstrap_and_add_host,
+    choose_account_route, is_ssh_ed25519_pub, list_nearby, load_remote_hosts, probe_remote_host,
+    public_ssh_entry, publish_managed_logins, remove_host, remove_project, run_remote_doctor,
+    set_wan_share, sync_account_authorized_keys, teamups_channel_client_id,
+    teamups_channel_signed_in, teamups_computers, wan_share_enabled, AccountRoute,
+    BootstrapHostOptions, LinkDirEntry, LinkDoctorSummary, LinkFilePayload, LinkFixSummary,
+    LinkHello, LinkInitResult, LinkWorkspaceRow, RemoteDoctorOptions, RemoteDoctorReport,
+    RemoteHostProbeReport, RemoteHostsDocument,
 };
 use serde::Serialize;
 use tauri::{Emitter, State};
@@ -357,6 +360,187 @@ pub async fn linked_workspace_fix_command(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountComputerRow {
+    pub id: String,
+    pub name: String,
+    pub connected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountLinkStatus {
+    pub signed_in: bool,
+    pub sharing: bool,
+    pub public_ip: String,
+    pub keys_ready: bool,
+    pub computers: Vec<AccountComputerRow>,
+}
+
+fn account_link_status(state: &LinkSessionState) -> Result<AccountLinkStatus, String> {
+    let sharing = wan_share_enabled();
+    if !teamups_channel_signed_in().unwrap_or(false) {
+        return Ok(AccountLinkStatus {
+            signed_in: false,
+            sharing,
+            public_ip: String::new(),
+            keys_ready: true,
+            computers: Vec::new(),
+        });
+    }
+    let computers = teamups_computers()
+        .map_err(|_| "没能看到同一账号的电脑。请确认已登录，稍后再看。".to_string())?;
+    let self_id = teamups_channel_client_id().unwrap_or_default();
+    let keys_ready = if sharing {
+        let keys: Vec<(String, String)> = computers
+            .iter()
+            .filter(|computer| computer.id != self_id && is_ssh_ed25519_pub(&computer.ssh_pub))
+            .map(|computer| (computer.id.clone(), computer.ssh_pub.clone()))
+            .collect();
+        sync_account_authorized_keys(&keys).is_ok()
+    } else {
+        true
+    };
+    let public_ip = computers
+        .iter()
+        .find(|computer| computer.id == self_id && computer.wan)
+        .map(|computer| computer.public_ip.clone())
+        .unwrap_or_default();
+    let nearby: Vec<(String, String)> = list_nearby()
+        .into_iter()
+        .map(|peer| (peer.id, peer.account))
+        .collect();
+    let nearby_refs: Vec<(&str, &str)> = nearby
+        .iter()
+        .map(|(lan_id, account_id)| (lan_id.as_str(), account_id.as_str()))
+        .collect();
+    let connected: std::collections::HashSet<String> = state
+        .status_rows()
+        .into_iter()
+        .filter(|row| row.connected && row.host_id.starts_with("acct-"))
+        .map(|row| row.host_id)
+        .collect();
+    let mut rows = Vec::new();
+    for computer in computers {
+        if computer.id == self_id {
+            continue;
+        }
+        if !matches!(
+            choose_account_route(
+                &computer.id,
+                computer.wan,
+                &computer.public_ip,
+                &computer.ssh_user,
+                &nearby_refs,
+            ),
+            AccountRoute::PublicSsh { .. }
+        ) {
+            continue;
+        }
+        let host_id = account_host_id(&computer.id).unwrap_or_default();
+        rows.push(AccountComputerRow {
+            connected: connected.contains(&host_id),
+            name: if computer.name.trim().is_empty() {
+                "这台电脑".into()
+            } else {
+                computer.name
+            },
+            id: computer.id,
+        });
+    }
+    Ok(AccountLinkStatus {
+        signed_in: true,
+        sharing,
+        public_ip,
+        keys_ready,
+        computers: rows,
+    })
+}
+
+#[tauri::command]
+pub fn set_wan_share_command(enabled: bool, app: tauri::AppHandle) {
+    set_wan_share(enabled);
+    if enabled {
+        let _ = account_ssh_public_key();
+    } else {
+        let _ = sync_account_authorized_keys(&[]);
+    }
+    crate::channel_link::refresh_share(&app);
+}
+
+#[tauri::command]
+pub async fn account_link_status_command(
+    state: State<'_, LinkSessionState>,
+) -> Result<AccountLinkStatus, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || account_link_status(&state))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn connect_account_computer_command(
+    id: String,
+    state: State<'_, LinkSessionState>,
+    app: tauri::AppHandle,
+) -> Result<LinkConnectReport, String> {
+    let state = (*state).clone();
+    let report =
+        tauri::async_runtime::spawn_blocking(move || connect_account_computer(&state, &id))
+            .await
+            .map_err(|error| error.to_string())?;
+    if report.ok {
+        let _ = app.emit("workspace-changed", &report.host_id);
+    }
+    Ok(report)
+}
+
+fn connect_account_computer(state: &LinkSessionState, id: &str) -> LinkConnectReport {
+    let host_id = account_host_id(id).unwrap_or_else(|| format!("acct-{id}"));
+    let fail = |kind: &str, message: &str| LinkConnectReport {
+        host_id: host_id.clone(),
+        ok: false,
+        connected: false,
+        computer_name: String::new(),
+        message: message.into(),
+        kind: kind.into(),
+    };
+    let Ok(computers) = teamups_computers() else {
+        return fail("other", "没能看到同一账号的电脑。请确认已登录，稍后再看。");
+    };
+    let Some(computer) = computers.into_iter().find(|computer| computer.id == id) else {
+        return fail("off", "这台电脑现在没开，或还没登录同一个账号。");
+    };
+    let nearby: Vec<(String, String)> = list_nearby()
+        .into_iter()
+        .map(|peer| (peer.id, peer.account))
+        .collect();
+    let nearby_refs: Vec<(&str, &str)> = nearby
+        .iter()
+        .map(|(lan_id, account_id)| (lan_id.as_str(), account_id.as_str()))
+        .collect();
+    match choose_account_route(
+        &computer.id,
+        computer.wan,
+        &computer.public_ip,
+        &computer.ssh_user,
+        &nearby_refs,
+    ) {
+        AccountRoute::SameLan { .. } => fail("lan", "这台电脑就在旁边。用上面的列表连接。"),
+        AccountRoute::Unavailable => {
+            fail("off", "这台电脑还没分享到外网。在那边打开「分享到外网」。")
+        }
+        AccountRoute::PublicSsh { host, user } => match public_ssh_entry(&host, &user) {
+            Ok(entry) => state.connect_direct(&host_id, &entry),
+            Err(_) => fail(
+                "ssh",
+                "连不上。请确认两边都登录了同一个账号，并在那台电脑打开系统的远程登录，再在路由器把外网的 22 转到那台电脑。",
+            ),
+        },
+    }
 }
 
 #[tauri::command]

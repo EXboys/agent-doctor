@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use agent_doctor_core::{
     connect_nearby, list_nearby, load_remote_hosts, mark_host_linked, open_link_tunnel,
     open_nearby_client, LinkClient, LinkConnectFailure, LinkHello, LinkTunnel, NearbyEndpoint,
+    RemoteHostEntry,
 };
 use serde::Serialize;
 
@@ -175,6 +176,61 @@ impl LinkSessionState {
         }
     }
 
+    /// SSH to a public address without writing it into the saved server list.
+    pub fn connect_direct(&self, host_id: &str, entry: &RemoteHostEntry) -> LinkConnectReport {
+        self.disconnect(host_id);
+        match open_link_tunnel(host_id, entry) {
+            Ok((tunnel, hello)) => {
+                let computer_name = hello.computer_name.clone();
+                if let Ok(mut guard) = self.inner.lock() {
+                    guard.insert(
+                        host_id.to_string(),
+                        LiveLink {
+                            local_port: tunnel.local_port,
+                            tunnel: Some(tunnel),
+                            stop_proxy: None,
+                            hello,
+                            lan_endpoint: None,
+                            lan: None,
+                        },
+                    );
+                }
+                LinkConnectReport {
+                    host_id: host_id.to_string(),
+                    ok: true,
+                    connected: true,
+                    computer_name,
+                    message: "已连上，可以操作那边的项目了。".into(),
+                    kind: "ok".into(),
+                }
+            }
+            Err(LinkConnectFailure::SshUnreachable { .. }) => LinkConnectReport {
+                host_id: host_id.to_string(),
+                ok: false,
+                connected: false,
+                computer_name: String::new(),
+                message: "连不上。请确认两边都登录了同一个账号，并在那台电脑打开系统的远程登录，再在路由器把外网的 22 转到那台电脑。".into(),
+                kind: "ssh".into(),
+            },
+            Err(LinkConnectFailure::ClientNotOpen { .. }) => LinkConnectReport {
+                host_id: host_id.to_string(),
+                ok: false,
+                connected: false,
+                computer_name: String::new(),
+                message: "已经连上那台电脑，但那边的客户端还没打开。".into(),
+                kind: "client".into(),
+            },
+            Err(LinkConnectFailure::Other { detail }) => LinkConnectReport {
+                host_id: host_id.to_string(),
+                ok: false,
+                connected: false,
+                computer_name: String::new(),
+                message: detail,
+                kind: "other".into(),
+            },
+        }
+    }
+
     pub fn connect_nearby(&self, peer_id: &str) -> LinkConnectReport {
         let host_id = format!("lan-{peer_id}");
         self.disconnect(&host_id);
@@ -273,7 +329,7 @@ impl LinkSessionState {
             return LinkClient::connect_local(port).map_err(|err| format!("{err:#}"));
         }
         if host_id.starts_with("lan-") {
-            Err("还没连上这台电脑。先在旁边的电脑里点「在这台电脑上用」。".into())
+            Err("还没连上这台电脑。先在「客户端互联」里点「在这台电脑上用」。".into())
         } else {
             Err("还没连上这台电脑，请先点连接。".into())
         }
@@ -339,7 +395,8 @@ impl LinkSessionState {
         }
         if let Some(guard) = connected.as_ref() {
             for (host_id, live) in guard.iter() {
-                if !host_id.starts_with("lan-") || rows.iter().any(|row| row.host_id == *host_id) {
+                let shared = host_id.starts_with("lan-") || host_id.starts_with("acct-");
+                if !shared || rows.iter().any(|row| row.host_id == *host_id) {
                     continue;
                 }
                 let name = live.hello.computer_name.clone();

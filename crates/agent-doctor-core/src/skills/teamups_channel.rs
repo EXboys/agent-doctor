@@ -7,7 +7,9 @@
 //! `wss://<site>/api/v1/doctor/channel`
 //! `Authorization: Bearer <license>`
 //!
-//! Client: `{"type":"hello","id":"...","name":"...","os":"...","ip":"...","resume":true,"since":{}}`
+//! Client: `{"type":"hello","id":"...","name":"...","os":"...","ip":"...","resume":true,"since":{},"wan":false}`
+//! `wan` is 分享到外网. `sshUser` and `sshPub` go with it so another computer on
+//! the account can open SSH to port 22. `presence` updates those fields only.
 //! `since` maps phone conversation ids to the archive update this computer
 //! last merged. `{}` means "nothing here yet" and asks the site to replay
 //! every conversation it kept — that is how a reinstalled computer catches up.
@@ -127,7 +129,39 @@ pub fn teamups_channel_hello() -> String {
         &computer_os(),
         &computer_lan_ip(),
         &since,
+        current_hello_share(),
     )
+}
+
+/// Address and login key only. Sent when 分享到外网 changes, so the site
+/// does not replay conversations the way a fresh hello would.
+pub fn teamups_channel_presence() -> String {
+    let share = current_hello_share();
+    let mut value = json!({
+        "type": "presence",
+        "wan": share.wan,
+    });
+    if !share.ssh_user.is_empty() {
+        value["sshUser"] = json!(share.ssh_user);
+    }
+    if !share.ssh_pub.is_empty() {
+        value["sshPub"] = json!(share.ssh_pub);
+    }
+    value.to_string()
+}
+
+struct HelloShare {
+    wan: bool,
+    ssh_user: String,
+    ssh_pub: String,
+}
+
+fn current_hello_share() -> HelloShare {
+    HelloShare {
+        wan: crate::remote::wan_share_enabled(),
+        ssh_user: crate::remote::account_ssh_user(),
+        ssh_pub: crate::remote::account_ssh_public_key().unwrap_or_default(),
+    }
 }
 
 /// The per-conversation cursors the chat window pushed: `{conversationId:
@@ -187,8 +221,15 @@ fn new_client_id() -> String {
     format!("ad-{now:x}")
 }
 
-fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str, since: &Value) -> String {
-    json!({
+fn channel_hello_frame(
+    id: &str,
+    name: &str,
+    os: &str,
+    ip: &str,
+    since: &Value,
+    share: HelloShare,
+) -> String {
+    let mut value = json!({
         "type": "hello",
         "id": clip_field(id, 64),
         "name": clip_field(name, 80),
@@ -196,8 +237,15 @@ fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str, since: &Value) 
         "ip": clip_field(ip, 64),
         "resume": true,
         "since": since,
-    })
-    .to_string()
+        "wan": share.wan,
+    });
+    if !share.ssh_user.is_empty() {
+        value["sshUser"] = json!(clip_field(&share.ssh_user, 32));
+    }
+    if !share.ssh_pub.is_empty() {
+        value["sshPub"] = json!(clip_field(&share.ssh_pub, 200));
+    }
+    value.to_string()
 }
 
 /// This computer's channel id, so schedules can bind to it.
@@ -677,7 +725,7 @@ mod tests {
     use super::{
         channel_hello_frame, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
         parse_teamups_channel_job, parse_teamups_channel_sync, teamups_channel_reply,
-        teamups_channel_ws_url,
+        teamups_channel_ws_url, HelloShare,
     };
 
     #[test]
@@ -788,6 +836,11 @@ mod tests {
             "macOS",
             "192.168.1.8",
             &serde_json::json!({"chat-1": 1234}),
+            HelloShare {
+                wan: false,
+                ssh_user: String::new(),
+                ssh_pub: String::new(),
+            },
         );
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["type"], "hello");
@@ -797,15 +850,24 @@ mod tests {
         assert_eq!(value["ip"], "192.168.1.8");
         assert_eq!(value["resume"], true);
         assert_eq!(value["since"]["chat-1"], 1234);
+        assert_eq!(value["wan"], false);
         let empty: serde_json::Value = serde_json::from_str(&channel_hello_frame(
             "ad-1",
             "n",
             "os",
             "ip",
             &serde_json::json!({}),
+            HelloShare {
+                wan: true,
+                ssh_user: "air".into(),
+                ssh_pub: "ssh-ed25519 AAAA".into(),
+            },
         ))
         .unwrap();
         assert_eq!(empty["since"], serde_json::json!({}));
+        assert_eq!(empty["wan"], true);
+        assert_eq!(empty["sshUser"], "air");
+        assert_eq!(empty["sshPub"], "ssh-ed25519 AAAA");
     }
 
     #[test]
