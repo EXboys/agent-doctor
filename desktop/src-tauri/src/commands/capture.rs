@@ -209,8 +209,10 @@ fn close_overlays(app: &AppHandle, session: Option<RegionSession>) {
 
 /// The picker must survive Space switches and full-screen apps, so give its
 /// window the same native treatment the island chip gets: screen-saver level
-/// plus a join-every-space collection behavior.
-#[cfg(target_os = "macos")]
+/// plus a join-every-space collection behavior. Called once at build and
+/// again from the page after show + focus — showing and keying a window can
+/// drop it back onto the space it was opened on.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn float_above_every_space(window: &tauri::WebviewWindow) {
     use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
@@ -232,4 +234,15 @@ fn float_above_every_space(window: &tauri::WebviewWindow) {
         );
         ns.orderFrontRegardless();
     }
+}
+
+/// The picker page calls this right after it shows and focuses itself, so the
+/// join-every-space behavior is asserted on a visible, keyed window.
+#[tauri::command]
+pub fn pin_picker_command(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    float_above_every_space(&window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+    Ok(())
 }

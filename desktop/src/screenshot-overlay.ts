@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { cancelRegionCapture, completeRegionCapture } from "./ipc";
+import { cancelRegionCapture, completeRegionCapture, pinPicker } from "./ipc";
 
 let dragging = false;
 let done = false;
@@ -89,6 +89,15 @@ window.addEventListener("contextmenu", (event) => {
 async function reveal(): Promise<void> {
   const current = getCurrentWindow();
   await current.show();
+  // Showing and keying a window can pin it back to the space it opened on,
+  // so the join-every-space behavior is re-asserted after both, once through
+  // tauri and once natively.
+  try {
+    await current.setVisibleOnAllWorkspaces(true);
+  } catch {
+    /* older runtime without the API */
+  }
   await current.setFocus();
+  await pinPicker().catch(() => {});
 }
 void reveal();

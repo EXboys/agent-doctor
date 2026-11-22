@@ -1466,6 +1466,10 @@ export function cancelRegionCapture(): Promise<void> {
   return invoke("cancel_region_capture_command");
 }
 
+export function pinPicker(): Promise<void> {
+  return invoke("pin_picker_command");
+}
+
 export type AskImageSupport = {
   runtime: string;
   sees_images: boolean;

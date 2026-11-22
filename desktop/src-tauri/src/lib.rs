@@ -1203,6 +1203,7 @@ pub fn run() {
             start_region_capture_command,
             complete_region_capture_command,
             cancel_region_capture_command,
+            pin_picker_command,
             publish_island_snapshot_command,
             island_set_hover_command,
             island_place_chip_command,
