@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cancelRegionCapture, completeRegionCapture } from "./ipc";
 
@@ -81,13 +80,8 @@ window.addEventListener("contextmenu", (event) => {
   cancel();
 });
 
-// The picker shows a frozen shot of the screen instead of looking through a
-// transparent window, so the backdrop always matches what was on screen.
-const shot = new URLSearchParams(location.hash.replace(/^#/, "")).get("shot");
-if (shot) {
-  document.body.style.backgroundImage = `linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.15)), url("${convertFileSrc(shot)}")`;
-  document.body.style.backgroundSize = "cover";
-}
+// The picker is a live see-through dim over whatever is on screen right now,
+// so switching desktops mid-pick selects from the space you landed on.
 
 // Built hidden so it never flashes white. Show, then grab key focus — without
 // it the first drag only activates the window and Esc never arrives, leaving

@@ -702,9 +702,18 @@ pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
     }
 }
 
-/// Freeze one full display for the chat screenshot picker.
+/// Grab one region off the live screen for the chat screenshot picker. The
+/// picker floats over every space, so whatever the person landed on — another
+/// desktop, a full-screen app — is what gets captured. `display` and the rect
+/// are in CG global points.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn capture_display_full(display: proto::DisplayBox) -> Result<String, String> {
+pub fn capture_screen_region(
+    display: proto::DisplayBox,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         if !unsafe { CGPreflightScreenCaptureAccess() } {
@@ -721,10 +730,10 @@ pub fn capture_display_full(display: proto::DisplayBox) -> Result<String, String
             );
         }
         let shot = capture_rect(
-            display.origin_x,
-            display.origin_y,
-            display.width,
-            display.height,
+            display.origin_x + x,
+            display.origin_y + y,
+            width,
+            height,
             Some(display.id),
         )
         .map_err(|err| err.to_string())?;
@@ -732,7 +741,7 @@ pub fn capture_display_full(display: proto::DisplayBox) -> Result<String, String
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = display;
+        let _ = (display, x, y, width, height);
         Err("the screen is captured on macOS".to_string())
     }
 }

@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -10,14 +11,13 @@ pub struct ScreenCapture {
     pub path: String,
 }
 
-/// One overlay: which display it sits on and the frozen full-screen shot it
-/// shows. The picker drags on the frozen picture, so the dim layer can never
-/// land in the result and what you saw is what you get.
+/// One overlay: which display it sits on. The picker floats over every
+/// space; the capture happens live when the drag finishes, so the space the
+/// person landed on is what they picked on.
 #[derive(Clone)]
 struct Overlay {
     label: String,
     display: DisplayBox,
-    shot: String,
 }
 
 struct RegionSession {
@@ -43,20 +43,15 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
     let initiator = window.label().to_string();
     let mut overlays = Vec::new();
     for (idx, display) in displays.iter().enumerate() {
-        // One bad display must not take the whole picker down; skip it and
-        // keep the rest. The stderr line lands in the app log, so a person
-        // testing with a fresh monitor leaves the exact frames behind.
-        let Ok(shot) = crate::computer_hand::capture_display_full(*display) else {
-            eprintln!("[screenshot] display {idx}: freeze failed");
-            continue;
-        };
+        // The stderr line lands in the app log, so a person testing with a
+        // fresh monitor leaves the exact frames behind.
         let label = format!("screenshot-{idx}");
         let (x, y, width, height) = logical_frame(display);
         eprintln!(
             "[screenshot] display {idx}: capture=({},{} {}x{}) scale={} place=({},{} {width}x{height})",
             display.origin_x, display.origin_y, display.width, display.height, display.scale, x, y,
         );
-        let url = WebviewUrl::App(format!("screenshot.html#shot={shot}").into());
+        let url = WebviewUrl::App("screenshot.html".into());
         let built = WebviewWindowBuilder::new(&app, label.clone(), url)
             .title("Agent Doctor")
             .position(x, y)
@@ -69,6 +64,7 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
             .visible_on_all_workspaces(true)
             .skip_taskbar(true)
             .shadow(false)
+            .background_color(tauri::webview::Color(0, 0, 0, 0))
             .accept_first_mouse(true)
             .visible(false)
             .build();
@@ -92,7 +88,6 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
         overlays.push(Overlay {
             label,
             display: *display,
-            shot,
         });
     }
     if overlays.is_empty() {
@@ -118,19 +113,24 @@ pub async fn complete_region_capture_command(
     height: f64,
 ) -> Result<(), String> {
     let session = take_region().ok_or_else(|| "no region picker is open".to_string())?;
-    let overlay = session
+    let display = session
         .overlays
         .iter()
         .find(|overlay| overlay.label == window.label())
-        .cloned()
+        .map(|overlay| overlay.display)
         .ok_or_else(|| "unknown screenshot overlay".to_string())?;
     let initiator = session.initiator.clone();
-    let cropped =
-        tauri::async_runtime::spawn_blocking(move || crop_shot(&overlay, x, y, width, height))
-            .await
-            .map_err(|err| err.to_string());
+    // Drop the dim layer first so it never lands in the shot, then grab the
+    // live screen — the space the person landed on is the one they picked on.
+    hide_overlays(&app, &session.overlays);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let captured = tauri::async_runtime::spawn_blocking(move || {
+        crate::computer_hand::capture_screen_region(display, x, y, width, height)
+    })
+    .await
+    .map_err(|err| err.to_string());
     close_overlays(&app, Some(session));
-    let _ = match cropped {
+    let _ = match captured {
         Ok(Ok(path)) => app.emit_to(
             initiator.clone(),
             "screenshot-captured",
@@ -159,54 +159,13 @@ pub fn cancel_region_capture_command(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Cut the picked rect out of the frozen shot. The rect arrives in logical
-/// points from the picker; the shot is stored in this platform's capture
-/// unit. The scale comes from the shot itself — the reported display scale
-/// has been wrong on modern macOS, and points against a 2x image would crop
-/// only the top-left quarter of the selection.
-#[cfg(any(target_os = "macos", windows))]
-fn crop_shot(overlay: &Overlay, x: f64, y: f64, width: f64, height: f64) -> Result<String, String> {
-    let image = image::open(&overlay.shot)
-        .map_err(|err| format!("could not read the frozen shot: {err}"))?;
-    let scale = if overlay.display.width > 0.0 {
-        (image.width() as f64 / overlay.display.width).max(1.0)
-    } else {
-        1.0
-    };
-    let pixel = |value: f64| (value * scale).round() as i64;
-    let left = pixel(x).clamp(0, i64::from(image.width()) - 1);
-    let top = pixel(y).clamp(0, i64::from(image.height()) - 1);
-    let crop_width = pixel(width).clamp(1, i64::from(image.width()) - left);
-    let crop_height = pixel(height).clamp(1, i64::from(image.height()) - top);
-    let cropped = image.crop_imm(
-        left as u32,
-        top as u32,
-        crop_width as u32,
-        crop_height as u32,
-    );
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    // Same folder and name pattern as the platform's own shots, so the asset
-    // scope already lets the chat show the thumbnail.
-    #[cfg(target_os = "macos")]
-    let out = format!("/tmp/agent-doctor-screen-{stamp}.png");
-    #[cfg(windows)]
-    let out = std::env::temp_dir()
-        .join(format!("agent-doctor-screen-{stamp}.png"))
-        .display()
-        .to_string();
-    cropped
-        .save(&out)
-        .map_err(|err| format!("could not save the shot: {err}"))?;
-    Ok(out)
-}
-
-#[cfg(not(any(target_os = "macos", windows)))]
-fn crop_shot(overlay: &Overlay, x: f64, y: f64, width: f64, height: f64) -> Result<String, String> {
-    let _ = (overlay, x, y, width, height);
-    Err("the screen is captured on macOS".to_string())
+/// Drop the dim layer without a shot, before the live capture runs.
+fn hide_overlays(app: &AppHandle, overlays: &[Overlay]) {
+    for overlay in overlays {
+        if let Some(win) = app.get_webview_window(&overlay.label) {
+            let _ = win.hide();
+        }
+    }
 }
 
 /// Overlay frames in logical points; Windows displays carry pixels, so the

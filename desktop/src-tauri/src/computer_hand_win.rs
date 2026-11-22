@@ -338,14 +338,27 @@ pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
         .collect()
 }
 
-/// Freeze one full monitor for the chat screenshot picker.
-pub fn capture_display_full(display: proto::DisplayBox) -> Result<String, String> {
+/// Grab one region off the live monitor for the chat screenshot picker. The
+/// rect arrives in logical points from the picker and is scaled to the
+/// monitor's virtual-screen pixels.
+pub fn capture_screen_region(
+    display: proto::DisplayBox,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<String, String> {
+    let scale = if display.scale > 0.0 {
+        display.scale
+    } else {
+        1.0
+    };
     let desk = Desktop {
-        origin_x: display.origin_x.round() as i32,
-        origin_y: display.origin_y.round() as i32,
-        width: display.width.round().max(1.0) as i32,
-        height: display.height.round().max(1.0) as i32,
-        scale: display.scale,
+        origin_x: (display.origin_x + x * scale).round() as i32,
+        origin_y: (display.origin_y + y * scale).round() as i32,
+        width: (width * scale).round().max(1.0) as i32,
+        height: (height * scale).round().max(1.0) as i32,
+        scale,
     };
     let shot = capture_png(&desk).map_err(|err| err.to_string())?;
     Ok(shot.path)
