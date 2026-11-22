@@ -608,7 +608,7 @@ html[data-os="windows"] .resources-section-tab {
 
 .res-catalog-item {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: start;
   padding: 12px;
@@ -618,13 +618,9 @@ html[data-os="windows"] .resources-section-tab {
 }
 
 .res-catalog-item > .res-catalog-meta {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  margin-left: 52px;
+  align-self: center;
   position: relative;
   z-index: 1;
-  justify-items: start;
-  text-align: left;
 }
 
 .res-catalog-item.is-link {
@@ -696,10 +692,10 @@ html[data-os="windows"] .resources-section-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  justify-content: flex-start;
+  justify-content: flex-end;
   min-width: 0;
-  max-width: none;
-  flex-wrap: wrap;
+  max-width: 22rem;
+  flex-wrap: nowrap;
 }
 
 .res-catalog-meta.mall-actions > span {

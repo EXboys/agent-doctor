@@ -104,8 +104,25 @@ html[data-os="windows"] .widget-toolbar {
 }
 
 html[data-os="macos"]:not(.is-window-fullscreen) .widget-toolbar {
+  /* Lights stay on the top-left. The name drops under them; the
+     language switch and scan stay on that top row, at the right. */
+  position: relative;
+  align-items: flex-end;
+  padding-top: 32px;
+  padding-left: 0;
+  margin-bottom: 0;
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .widget-toolbar .toolbar-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .status-bar,
+html[data-os="macos"]:not(.is-window-fullscreen) .health-strip {
+  margin-top: -28px;
   min-height: 28px;
-  padding-left: 72px;
 }
 
 html.is-opaque-shell[data-os="windows"] .chat-top,
