@@ -16,6 +16,7 @@ pub mod doctor;
 mod hermes;
 mod mcp_ensure;
 mod openclaw;
+mod pi;
 mod plan;
 mod pump;
 mod qoder;
@@ -49,6 +50,7 @@ pub(crate) use cursor::CursorAskBackend;
 pub(crate) use deepseek_harness::DeepSeekHarnessAskBackend;
 pub(crate) use hermes::HermesAskBackend;
 pub(crate) use openclaw::OpenClawAskBackend;
+pub(crate) use pi::PiAskBackend;
 pub(crate) use qoder::QoderAskBackend;
 pub(crate) use workbuddy::WorkbuddyAskBackend;
 pub(crate) use zcode::ZcodeAskBackend;
@@ -65,6 +67,7 @@ static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
 static QODER_ASK: QoderAskBackend = QoderAskBackend;
 static CURSOR_ASK: CursorAskBackend = CursorAskBackend;
 static WORKBUDDY_ASK: WorkbuddyAskBackend = WorkbuddyAskBackend;
+static PI_ASK: PiAskBackend = PiAskBackend;
 static DOCTOR_ASK: doctor::DoctorAskBackend = doctor::DoctorAskBackend;
 
 /// Which runtimes have an [`AskBackend`] here. The registry in
@@ -81,6 +84,7 @@ pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
         "qoder" => Some(&QODER_ASK),
         "cursor" => Some(&CURSOR_ASK),
         "workbuddy" => Some(&WORKBUDDY_ASK),
+        "pi" => Some(&PI_ASK),
         agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID => Some(&DOCTOR_ASK),
         _ => None,
     }
@@ -98,6 +102,7 @@ pub fn ask_runtime_ids() -> Vec<&'static str> {
         "qoder",
         "cursor",
         "workbuddy",
+        "pi",
         agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID,
     ]
 }
@@ -665,7 +670,7 @@ fn required_protocol_for_runtime(runtime: &str) -> Option<&'static str> {
         "codex" | "hermes" | "openclaw" | "workbuddy" | "acp" => {
             Some(agent_doctor_core::setup::PROTOCOL_OPENAI)
         }
-        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID | "qoder" => Some("*"),
+        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID | "qoder" | "pi" => Some("*"),
         _ => None,
     }
 }
@@ -840,6 +845,7 @@ mod tests {
         assert!(ask_runtime_ids().contains(&"qoder"));
         assert!(ask_runtime_ids().contains(&"cursor"));
         assert!(ask_runtime_ids().contains(&"workbuddy"));
+        assert!(ask_runtime_ids().contains(&"pi"));
     }
 
     #[test]

@@ -23,6 +23,7 @@ export function runtimeDisplayName(runtime: AskRuntime): string {
   if (runtime === "qoder") return "Qoder";
   if (runtime === "cursor") return "Cursor";
   if (runtime === "workbuddy") return "WorkBuddy";
+  if (runtime === "pi") return "Pi";
   if (runtime === "doctor") return t("chat.doctorRuntimeName");
   return "Claude Code";
 }
@@ -39,6 +40,7 @@ export function isAskRuntime(value: string | null | undefined): value is AskRunt
     value === "qoder" ||
     value === "cursor" ||
     value === "workbuddy" ||
+    value === "pi" ||
     value === "doctor"
   );
 }

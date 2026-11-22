@@ -3,6 +3,7 @@ mod claude;
 mod codex;
 mod hermes;
 mod openclaw;
+mod pi;
 mod qoder;
 mod workbuddy;
 
@@ -11,6 +12,7 @@ pub use claude::*;
 pub use codex::*;
 pub use hermes::*;
 pub use openclaw::*;
+pub use pi::*;
 pub use qoder::*;
 pub use workbuddy::*;
 

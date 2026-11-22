@@ -15,6 +15,7 @@ export const FIRST_RUN_RUNTIME_ORDER = [
   "claude-code",
   "hermes",
   "openclaw",
+  "pi",
   "codex",
   "deepseek-harness",
 ] as const;

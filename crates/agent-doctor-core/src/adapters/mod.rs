@@ -4,6 +4,7 @@ mod cursor;
 mod deepseek_harness;
 mod hermes;
 mod openclaw;
+mod pi;
 mod qoder;
 pub mod util;
 mod workbuddy;
@@ -22,6 +23,7 @@ pub use deepseek_harness::{
 };
 pub use hermes::{HermesAdapter, HermesSettings};
 pub use openclaw::{configured_base_url, OpenClawAdapter};
+pub use pi::{pi_agent_dir, PiAdapter, PI_NODE_MIN, PI_NPM_PACKAGE, PI_RUNTIME_ID};
 pub(crate) use qoder::{locate_qoder, qoder_desktop_installs, QoderInstall};
 pub use qoder::{
     qoder_cli_path, qoder_cn_cli_path, qoder_config_dir, qoder_desktop_path,

@@ -12,7 +12,7 @@ import { isAskRuntime, runtimeDisplayName } from "./runtime";
 
 const STORAGE_KEY = "agent-doctor-ask-knowledge";
 
-const AGENTS = ["codex", "claude-code", "hermes", "openclaw", "deepseek-harness"] as const;
+const AGENTS = ["codex", "claude-code", "hermes", "openclaw", "pi", "deepseek-harness"] as const;
 
 type Tab = "global" | "project" | "agent";
 type AgentKind = "docs" | "memories";

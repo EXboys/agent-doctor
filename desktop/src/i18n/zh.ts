@@ -1721,6 +1721,7 @@ export const zh = {
     "resources.agentBlurb.doctor": "本软件自带的助手。不用另外安装，随时能问、能帮你排查配置。",
     "resources.agentBlurb.hermes": "Nous 做的本机助手。安装时需要连接国外网站（GitHub），还不稳定。",
     "resources.agentBlurb.openclaw": "开源本机助手。在自己电脑上干活，不绑某一家窗口软件。",
+    "resources.agentBlurb.pi": "终端里的写代码助手。能用你填的服务商，也能用它自己的账号。",
     "resources.agentBlurb.claude-code": "Anthropic 做的写代码助手。把任务说清楚，改得稳、讲得明白。",
     "resources.agentBlurb.codex": "OpenAI 做的写代码助手。和 ChatGPT 一家，适合日常改代码。",
     "resources.agentBlurb.deepseek-harness": "深度求索做的写代码助手。目前处于试验阶段，还不稳定。",

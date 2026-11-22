@@ -1725,6 +1725,7 @@ export const en = {
     "resources.agentBlurb.doctor": "Built into this app. Nothing to install — ask right away or check your setup.",
     "resources.agentBlurb.hermes": "A Nous helper on this computer. Still unstable — its installer has to reach GitHub outside China.",
     "resources.agentBlurb.openclaw": "An open-source helper on this computer. Gets work done without locking you to one app window.",
+    "resources.agentBlurb.pi": "A coding helper in the terminal. It can use a provider you saved, or its own account.",
     "resources.agentBlurb.claude-code": "Anthropic’s coding helper. Clear on the task, steady edits, plain explanations.",
     "resources.agentBlurb.codex": "OpenAI’s coding helper — same family as ChatGPT. Good for everyday code changes.",
     "resources.agentBlurb.deepseek-harness": "DeepSeek’s coding helper. Still in experimental preview and may be unstable.",

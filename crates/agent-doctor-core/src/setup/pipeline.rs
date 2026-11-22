@@ -311,6 +311,19 @@ fn project_one_runtime(
             &bundle.api_key,
             Some(&bundle.model),
         ),
+        (_, "pi") => {
+            let target_url = if bundle.protocol == PROTOCOL_ANTHROPIC {
+                claude_code_target_url(bundle).unwrap_or(bundle.gateway_url.as_str())
+            } else {
+                bundle.gateway_url.as_str()
+            };
+            merge::apply_pi_with_model(
+                target_url,
+                &bundle.api_key,
+                &bundle.protocol,
+                Some(&bundle.model),
+            )
+        }
         (_, "qoder") => {
             let target_url = if bundle.protocol == PROTOCOL_ANTHROPIC {
                 claude_code_target_url(bundle).unwrap_or(bundle.gateway_url.as_str())
@@ -884,7 +897,7 @@ mod tests {
         for id in all_runtime_ids() {
             let wired = matches!(
                 id,
-                "openclaw" | "hermes" | "codex" | "claude-code" | "qoder" | "workbuddy"
+                "openclaw" | "hermes" | "codex" | "claude-code" | "qoder" | "workbuddy" | "pi"
             );
             assert_eq!(strategy_for(id).is_some(), wired, "{id}");
         }

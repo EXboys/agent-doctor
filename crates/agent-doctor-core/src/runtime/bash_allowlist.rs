@@ -6,7 +6,8 @@ use crate::lifecycle::deepseek_harness::{
 use crate::lifecycle::hermes::{hermes_install_shell_command, hermes_update_shell_command};
 use crate::lifecycle::npm_cli::{
     claude_code_install_shell_command, claude_code_update_shell_command,
-    codex_install_shell_command, codex_update_shell_command,
+    codex_install_shell_command, codex_update_shell_command, pi_install_shell_command,
+    pi_update_shell_command,
 };
 use crate::lifecycle::openclaw::{openclaw_install_shell_command, openclaw_update_shell_command};
 
@@ -35,6 +36,7 @@ pub fn runtime_allowed_bash_commands(runtime_id: &str) -> Vec<String> {
             codex_update_shell_command(),
             "npm install -g @openai/codex".to_string(),
         ],
+        "pi" => vec![pi_install_shell_command(), pi_update_shell_command()],
         _ => Vec::new(),
     }
 }
@@ -161,6 +163,7 @@ fn version_cli_name(runtime_id: &str) -> Option<&'static str> {
         "openclaw" => Some("openclaw"),
         "claude-code" => Some("claude"),
         "codex" => Some("codex"),
+        "pi" => Some("pi"),
         _ => None,
     }
 }
@@ -178,6 +181,7 @@ pub fn bash_command_allowed_for_official_agent(command: &str) -> bool {
         "openclaw",
         "claude-code",
         "codex",
+        "pi",
     ]
     .iter()
     .any(|runtime| bash_command_allowed_for_runtime(runtime, command))

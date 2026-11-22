@@ -30,7 +30,7 @@ import { closeKnowledgePage, closeResourcesMainPage, closeSchedulePage } from ".
 import { SKILL_CATEGORY_ORDER } from "../skill-categories";
 import { saveSkillCategoryOverride } from "./skill-category-order";
 
-const AGENTS = ["codex", "claude-code", "hermes", "openclaw", "deepseek-harness"] as const;
+const AGENTS = ["codex", "claude-code", "hermes", "openclaw", "pi", "deepseek-harness"] as const;
 
 type Deps = {
   projects: () => string[];

@@ -8,10 +8,10 @@ use crate::lifecycle::{
     codex_install_shell_command, codex_update_shell_command,
     deepseek_harness_install_shell_command, deepseek_harness_update_shell_command,
     hermes_install_shell_command, hermes_update_shell_command, openclaw_install_shell_command,
-    openclaw_update_shell_command, qoder_install_shell_command, qoder_update_shell_command,
-    run_shell_command_streaming, waiting_input_kind, workbuddy_install_shell_command,
-    workbuddy_update_shell_command, write_install_log, zcode_install_shell_command,
-    zcode_update_shell_command,
+    openclaw_update_shell_command, pi_install_shell_command, pi_update_shell_command,
+    qoder_install_shell_command, qoder_update_shell_command, run_shell_command_streaming,
+    waiting_input_kind, workbuddy_install_shell_command, workbuddy_update_shell_command,
+    write_install_log, zcode_install_shell_command, zcode_update_shell_command,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
 use crate::repair_types::{
@@ -304,7 +304,7 @@ where
     // back to Homebrew/winget, which stall behind the GFW.
     if matches!(
         runtime_id,
-        "claude-code" | "codex" | "deepseek-harness" | "openclaw"
+        "claude-code" | "codex" | "deepseek-harness" | "openclaw" | "pi"
     ) {
         on_progress(InstallProgressEvent {
             runtime_id: runtime_id.to_string(),
@@ -327,6 +327,26 @@ where
                 reason: format!("Node.js / npm auto-install failed: {error:#}"),
                 log_path: None,
             });
+        }
+        if runtime_id == "pi" {
+            if let Err(error) = crate::lifecycle::nodejs::ensure_node_at_least_with_progress(
+                crate::adapters::PI_NODE_MIN,
+                |line, node_pct| {
+                    let percent = (10 + u16::from(node_pct) * 40 / 100) as u8;
+                    on_progress(InstallProgressEvent {
+                        runtime_id: runtime_id.to_string(),
+                        phase: "output".to_string(),
+                        message: line.to_string(),
+                        percent,
+                        input_kind: String::new(),
+                    });
+                },
+            ) {
+                return Err(InstallRunError {
+                    reason: format!("Node.js / npm auto-install failed: {error:#}"),
+                    log_path: None,
+                });
+            }
         }
     }
 
@@ -568,6 +588,7 @@ fn update_shell_command(runtime_id: &str) -> Option<String> {
         "openclaw" => Some(openclaw_update_shell_command()),
         "claude-code" => Some(claude_code_update_shell_command()),
         "codex" => Some(codex_update_shell_command()),
+        "pi" => Some(pi_update_shell_command()),
         "deepseek-harness" => Some(deepseek_harness_update_shell_command()),
         "zcode" => Some(zcode_update_shell_command()),
         "qoder" => Some(qoder_update_shell_command()),
@@ -583,6 +604,7 @@ fn install_shell_command(runtime_id: &str) -> Option<String> {
         "openclaw" => Some(openclaw_install_shell_command()),
         "claude-code" => Some(claude_code_install_shell_command()),
         "codex" => Some(codex_install_shell_command()),
+        "pi" => Some(pi_install_shell_command()),
         "zcode" => Some(zcode_install_shell_command()),
         "qoder" => Some(qoder_install_shell_command()),
         "workbuddy" => Some(workbuddy_install_shell_command()),
@@ -597,6 +619,7 @@ fn install_action_id(runtime_id: &str) -> &'static str {
         "openclaw" => "fix-openclaw-install",
         "claude-code" => "fix-claude-code-install",
         "codex" => "fix-codex-install",
+        "pi" => "fix-pi-install",
         "zcode" => "fix-zcode-install",
         "qoder" => "fix-qoder-install",
         "workbuddy" => "fix-workbuddy-install",

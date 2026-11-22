@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
     cursor_cli_path, ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter,
-    HermesAdapter, OpenClawAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
+    HermesAdapter, OpenClawAdapter, PiAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
 };
 use crate::config_syntax::{apply_config_syntax_repair, suggest_config_syntax_repairs};
 use crate::evotown::{
@@ -14,7 +14,7 @@ use crate::evotown::{
 };
 use crate::lifecycle::{
     run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle,
-    run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
+    run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle, run_pi_lifecycle,
     run_qoder_lifecycle, run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction,
     DeepSeekHarnessLifecycleAction, HermesLifecycleAction, NpmCliLifecycleAction,
     OpenClawLifecycleAction, QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
@@ -22,8 +22,8 @@ use crate::lifecycle::{
 use crate::probe::runtimes::{
     claude_code_probe_deep, codex_probe_deep, deepseek_harness_probe_deep, openclaw_probe_deep,
     probe_deep, probe_deep_noop, schema_claude_code, schema_codex, schema_cursor,
-    schema_deepseek_harness, schema_hermes, schema_openclaw, schema_qoder, schema_workbuddy,
-    schema_zcode,
+    schema_deepseek_harness, schema_hermes, schema_openclaw, schema_pi, schema_qoder,
+    schema_workbuddy, schema_zcode,
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
@@ -271,6 +271,7 @@ const CODEX_ENV: &[&str] = &["OPENAI", "CODEX"];
 const HERMES_ENV: &[&str] = &["HERMES", "OPENAI", "ANTHROPIC", "DEEPSEEK", "GOOGLE"];
 const DEEPSEEK_HARNESS_ENV: &[&str] = &["DSH", "DEEPSEEK"];
 const QODER_ENV: &[&str] = &["QODER"];
+const PI_ENV: &[&str] = &["PI", "OPENAI", "ANTHROPIC"];
 const WORKBUDDY_ENV: &[&str] = &["CODEBUDDY", "WORKBUDDY", "TENCENT"];
 const CURSOR_ENV: &[&str] = &["CURSOR"];
 const ZCODE_ENV: &[&str] = &["ZCODE"];
@@ -297,6 +298,10 @@ fn deepseek_harness_adapter() -> Box<dyn RuntimeAdapter> {
 
 fn qoder_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(QoderAdapter)
+}
+
+fn pi_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(PiAdapter)
 }
 
 fn workbuddy_adapter() -> Box<dyn RuntimeAdapter> {
@@ -333,6 +338,13 @@ const WIRE_CLAUDE: WiringSpec = WiringSpec {
 };
 
 const WIRE_QODER: WiringSpec = WiringSpec {
+    write_semantics: WriteSemantics::Additive,
+    effector: EffectorKind::None,
+    openai_compatible: true,
+    anthropic_compatible: true,
+};
+
+const WIRE_PI: WiringSpec = WiringSpec {
     write_semantics: WriteSemantics::Additive,
     effector: EffectorKind::None,
     openai_compatible: true,
@@ -410,6 +422,14 @@ fn open_qoder_session(
     open_qoder(cwd, prompt)
 }
 
+fn open_pi_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("pi", &["pi"], cwd, prompt)
+}
+
 fn open_workbuddy_session(
     cwd: &Path,
     prompt: Option<&str>,
@@ -479,6 +499,14 @@ fn run_codex_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
         RuntimeLifecycleAction::Update => NpmCliLifecycleAction::Update,
     };
     run_codex_lifecycle(action)
+}
+
+fn run_pi_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => NpmCliLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => NpmCliLifecycleAction::Update,
+    };
+    run_pi_lifecycle(action)
 }
 
 fn run_qoder_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
@@ -662,6 +690,27 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         browser_mcp: false,
     },
     RuntimeDescriptor {
+        id: "pi",
+        probe: RuntimeProbeSpec {
+            binary_name: "pi",
+            config_format: ConfigFormat::Json,
+            env_keywords: PI_ENV,
+        },
+        create_adapter: pi_adapter,
+        schema_probe: Some(schema_pi),
+        deep_probe: Some(probe_deep_noop),
+        run_lifecycle: Some(run_pi_lifecycle_action),
+        wiring: Some(WIRE_PI),
+        workspace_bind: None,
+        workspace_repairs: &[],
+        label: "Pi",
+        open_session: Some(open_pi_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: None,
+        skill_mount: false,
+        browser_mcp: false,
+    },
+    RuntimeDescriptor {
         id: "cursor",
         probe: RuntimeProbeSpec {
             binary_name: "agent",
@@ -714,6 +763,7 @@ pub fn descriptor_by_id(runtime_id: &str) -> Option<&'static RuntimeDescriptor> 
         "dsh" | "deepseek" | "deepseek_harness" => "deepseek-harness",
         "cursor-cli" | "cursor-agent" => "cursor",
         "z-code" => "zcode",
+        "pi-coding-agent" | "pi_coding_agent" => "pi",
         _ => runtime_id,
     };
     RUNTIME_REGISTRY.iter().find(|entry| entry.id == runtime_id)
@@ -988,6 +1038,7 @@ mod tests {
                 "codex",
                 "qoder",
                 "workbuddy",
+                "pi",
                 "cursor",
                 "zcode"
             ]
@@ -1152,7 +1203,8 @@ mod tests {
                 "claude-code",
                 "codex",
                 "qoder",
-                "workbuddy"
+                "workbuddy",
+                "pi"
             ]
         );
         let workspace: Vec<_> = RUNTIME_REGISTRY

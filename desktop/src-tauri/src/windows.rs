@@ -798,10 +798,11 @@ fn apply_main_window_rest(app: &AppHandle, rest: MainWindowRest) {
 /// Default chat runtime: the first installed ask agent in recommended order,
 /// else the built-in doctor agent so an empty machine can still chat.
 pub(crate) fn default_ask_runtime() -> String {
-    const PREFERRED: [&str; 6] = [
+    const PREFERRED: [&str; 7] = [
         "claude-code",
         "hermes",
         "openclaw",
+        "pi",
         "codex",
         "deepseek-harness",
         "zcode",

@@ -173,6 +173,7 @@ pub fn normalize_runtime(raw: &str) -> String {
         "qoder" => "qoder".into(),
         "workbuddy" | "codebuddy" => "workbuddy".into(),
         "zcode" | "z-code" => "zcode".into(),
+        "pi" | "pi-coding-agent" | "pi_coding_agent" => "pi".into(),
         other => other.to_string(),
     }
 }

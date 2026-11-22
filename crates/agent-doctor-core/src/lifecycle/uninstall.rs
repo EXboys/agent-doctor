@@ -11,6 +11,7 @@ fn npm_cli_binary_name(runtime_id: &str) -> Option<&'static str> {
     match runtime_id {
         "claude-code" => Some("claude"),
         "codex" => Some("codex"),
+        "pi" => Some("pi"),
         "deepseek-harness" => Some("dsh"),
         "openclaw" => Some("openclaw"),
         "qoder" => Some("qoder"),
@@ -23,6 +24,7 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
     let package = match runtime_id {
         "claude-code" => "@anthropic-ai/claude-code",
         "codex" => "@openai/codex",
+        "pi" => "@earendil-works/pi-coding-agent",
         "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
         "qoder" => {
             return Ok(
@@ -538,6 +540,7 @@ pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
             let package = match other {
                 "claude-code" => "@anthropic-ai/claude-code",
                 "codex" => "@openai/codex",
+                "pi" => "@earendil-works/pi-coding-agent",
                 "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
                 unknown => return Err(anyhow!("unknown runtime: {unknown}")),
             };
@@ -561,6 +564,10 @@ mod tests {
         assert_eq!(
             uninstall_shell_command("codex").unwrap(),
             "npm uninstall -g @openai/codex"
+        );
+        assert_eq!(
+            uninstall_shell_command("pi").unwrap(),
+            "npm uninstall -g @earendil-works/pi-coding-agent"
         );
         assert_eq!(
             uninstall_shell_command("deepseek-harness").unwrap(),

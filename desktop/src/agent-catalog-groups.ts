@@ -3,7 +3,7 @@
  *
  * Groups in the Resources → Agent catalog:
  * 1. `builtin`: built into this app, ready without installing (`doctor`).
- * 2. `npm`: direct command-line installs (Codex, Claude, OpenClaw).
+ * 2. `npm`: direct command-line installs (Codex, Claude, OpenClaw, Pi).
  * 3. `domestic`: dual-client suites with a desktop window and a command line
  *    (Cursor, WorkBuddy, Qoder, ZCode).
  * 4. `experimental`: preview / unstable helpers — Hermes (installer needs
@@ -27,6 +27,7 @@ const AGENT_ORDER: readonly string[] = [
   "codex",
   "claude-code",
   "openclaw",
+  "pi",
   "cursor",
   "workbuddy",
   "qoder",

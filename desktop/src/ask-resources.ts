@@ -72,6 +72,7 @@ export type AskRuntime =
   | "qoder"
   | "cursor"
   | "workbuddy"
+  | "pi"
   /** Built-in Agent Doctor agent loop (no external CLI). */
   | "doctor";
 

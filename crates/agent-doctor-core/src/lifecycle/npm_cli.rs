@@ -10,6 +10,32 @@ use super::npm_target::resolve_active_npm_prefix;
 const CLAUDE_NPM_PACKAGE: &str = "@anthropic-ai/claude-code";
 const CODEX_NPM_PACKAGE: &str = "@openai/codex";
 
+pub fn pi_install_shell_command() -> String {
+    // Pi's installer can fail on optional native pieces. Skipping scripts still
+    // installs the `pi` command.
+    format!(
+        "npm install -g --ignore-scripts {}",
+        crate::adapters::PI_NPM_PACKAGE
+    )
+}
+
+pub fn pi_update_shell_command() -> String {
+    format!(
+        "npm install -g --ignore-scripts {}@latest",
+        crate::adapters::PI_NPM_PACKAGE
+    )
+}
+
+pub fn run_pi_lifecycle(action: NpmCliLifecycleAction) -> Result<()> {
+    crate::lifecycle::nodejs::ensure_node_at_least(crate::adapters::PI_NODE_MIN)
+        .context("Pi 需要较新的 Node.js，这次没能准备好。")?;
+    let command = match action {
+        NpmCliLifecycleAction::Install => pi_install_shell_command(),
+        NpmCliLifecycleAction::Update => pi_update_shell_command(),
+    };
+    super::runner::run_shell_command(&command)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NpmCliLifecycleAction {
     Install,
@@ -99,6 +125,10 @@ mod tests {
         assert_eq!(
             codex_install_shell_command(),
             "npm install -g @openai/codex"
+        );
+        assert_eq!(
+            pi_install_shell_command(),
+            "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
         );
     }
 

@@ -21,6 +21,7 @@ assert.equal(isExperimentalRuntime("codex"), false);
 assert.equal(isExperimentalRuntime("cursor"), false);
 assert.equal(isExperimentalRuntime("claude-code"), false);
 assert.equal(isExperimentalRuntime("openclaw"), false);
+assert.equal(isExperimentalRuntime("pi"), false);
 
 // Dual-client suites install both CLI and desktop app; others install CLI only.
 assert.equal(installsDesktopAndCli("workbuddy"), true);
@@ -38,6 +39,8 @@ assert.equal(agentCatalogGroup("doctor"), "builtin");
 assert.equal(agentCatalogGroup("codex"), "npm");
 assert.equal(agentCatalogGroup("claude-code"), "npm");
 assert.equal(agentCatalogGroup("openclaw"), "npm");
+assert.equal(agentCatalogGroup("pi"), "npm");
+assert.equal(installsDesktopAndCli("pi"), false);
 assert.equal(agentCatalogGroup("cursor"), "domestic");
 assert.equal(agentCatalogGroup("workbuddy"), "domestic");
 assert.equal(agentCatalogGroup("qoder"), "domestic");
