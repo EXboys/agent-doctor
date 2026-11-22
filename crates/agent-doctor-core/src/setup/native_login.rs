@@ -2010,8 +2010,9 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
     // same address again shows the account that is already signed in, and that
     // page never comes back to this computer.
     // On Windows the login process has no window, so the browser Codex starts
-    // stays invisible and the printed hint is not a failure. Open that address
-    // once from this app, and close the browser Codex already started.
+    // stays invisible. The printed line is the full address, not a failure.
+    // Open that address once from this app (the shell keeps `redirect_uri`),
+    // and close the browser Codex already started.
     let open_printed_url = official_login_opens_printed_url(runtime_id);
     if let Some(pipe) = child.stdout.take() {
         watch_login_output_mode(pipe, Arc::clone(&opened), open_printed_url);
@@ -2021,7 +2022,7 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
     }
     // Codex opens its browser before it prints the address. Close that window
     // as it appears, so only the page this app opens is left on screen.
-    let _stop_browsers = open_printed_url.then(|| watch_spawned_browsers(child.id()));
+    let _stop_browsers = open_printed_url.then(|| hide_codex_spawned_browsers(child.id()));
     let started = Instant::now();
     loop {
         drain_macos_login_open_shim(open_shim.as_ref(), &opened);
@@ -2207,6 +2208,19 @@ impl Drop for StopBrowsers {
     fn drop(&mut self) {
         self.0.store(true, Ordering::Relaxed);
     }
+}
+
+/// Close browsers the Codex login process starts, until this value is dropped.
+/// On Windows that browser inherits the hidden console and never appears.
+/// The page this app opens is not a child of the login process, so it stays.
+pub(crate) fn hide_codex_spawned_browsers(root: u32) -> HiddenLoginBrowsers {
+    HiddenLoginBrowsers {
+        _stop: cfg!(windows).then(|| watch_spawned_browsers(root)),
+    }
+}
+
+pub(crate) struct HiddenLoginBrowsers {
+    _stop: Option<StopBrowsers>,
 }
 
 fn watch_spawned_browsers(root: u32) -> StopBrowsers {
@@ -2486,6 +2500,15 @@ mod tests {
             first_login_url(banner).as_deref(),
             Some("https://auth.openai.com/oauth/authorize?x=1")
         );
+    }
+
+    #[test]
+    fn authorize_url_keeps_redirect_uri_past_every_ampersand() {
+        let url = "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=abc";
+        let banner = format!(
+            "Starting local login server on http://localhost:1455.\nIf your browser did not open, navigate to this URL to authenticate:\n\n{url}\n"
+        );
+        assert_eq!(first_login_url(&banner).as_deref(), Some(url));
     }
 
     #[test]

@@ -22,6 +22,7 @@
 1. 每个spawn 的标志按「它的孩子还要起什么」选，不按「和别处保持一致」选。
 2. 标志只许住在唯一合法文件里：`CREATE_NEW_CONSOLE` 只在 `session_launch/terminal.rs`，`DETACHED_PROCESS` 全仓禁用，其余一律 `CREATE_NO_WINDOW`。围栏 `creation_flags_stay_in_their_sanctioned_files`（`raw_spawn_guard.rs`）拦违规标志；`runner.rs` 与 `exec/process.rs` 的测试钉死 `0x08000000`。
 3. **修哪条路只动哪条路。** 一次修复顺手「统一」另一处的标志，就是 `a678e8b` 的做法。动任何 spawn 点前，先说出这个进程的孩子树：它起谁、那些孩子又起谁。
+4. **给用户看的网页不用 `cmd /c start`。** `session_launch/terminal.rs` 的 `open_url` 在 Windows 上用 `ShellExecuteW(SW_SHOWNORMAL)`。`CREATE_NO_WINDOW` 会顺着 `cmd` 传给浏览器，窗口起不来；没加引号的 `&` 还会把授权地址从 `redirect_uri` 前截断，页面停在已登录、回不到本机。Codex 订阅登录只由客户端打开这一次，并关掉登录进程自己拉起的那个浏览器。
 
 ## 二、交给外部 runtime 的环境：由我们清洗，坏值说人话
 

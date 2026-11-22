@@ -198,24 +198,61 @@ pub fn open_url(url: &str) -> Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        // `status()` can wait on the "choose an app" dialog if claude-cli://
-        // is unregistered, which froze the desktop on "Opening…".
-        Command::new("cmd") // raw-spawn-ok
-            .args(["/C", "start", "", url])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .context("failed to run `start` for deep link")?;
-        Ok(())
+        // ShellExecute shows the window and keeps every `&` in the address.
+        // `cmd /c start` does neither: CREATE_NO_WINDOW hides the browser it
+        // starts, and an unquoted `&` cuts an OAuth URL before `redirect_uri`,
+        // so the page stays on the signed-in account and never comes back.
+        open_url_with_shell(url)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         bail!("deep link open is not supported on this platform");
     }
+}
+
+/// Ask the shell to show `url`. Returns as soon as the shell accepts it, so a
+/// missing protocol handler cannot freeze the desktop on "Opening…".
+#[cfg(target_os = "windows")]
+fn open_url_with_shell(url: &str) -> Result<()> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut std::ffi::c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> isize;
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        OsStr::new(text)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let operation = wide("open");
+    let file = wide(url);
+    // SW_SHOWNORMAL. A null owner is the desktop. The shell copies both strings.
+    let code = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if code <= 32 {
+        bail!("could not open {url}");
+    }
+    Ok(())
 }
 
 /// When Agent Doctor's isolated `chrome-cdp` process is running on macOS, plain

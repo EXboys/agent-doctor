@@ -83,12 +83,16 @@ pub fn start_subscription_login(runtime: &str, name: &str) -> Result<Subscriptio
     let mut child = cmd.spawn()?;
     let opened = Arc::new(AtomicBool::new(false));
     // Both tools open the page themselves. A second open stops on the signed-in account.
+    // Windows Codex is the exception: its browser inherits a hidden console and
+    // never appears. Open the printed address once, and close that hidden window.
+    let open_printed = runtime == "codex" && cfg!(windows);
     if let Some(pipe) = child.stdout.take() {
-        watch_login_output(pipe, Arc::clone(&opened));
+        watch_login_output(pipe, Arc::clone(&opened), open_printed);
     }
     if let Some(pipe) = child.stderr.take() {
-        watch_login_output(pipe, opened);
+        watch_login_output(pipe, opened, open_printed);
     }
+    let _hidden = open_printed.then(|| crate::setup::hide_codex_spawned_browsers(child.id()));
     let started = Instant::now();
     loop {
         if credential_ready(runtime, &dir) {
@@ -191,7 +195,7 @@ fn read_json(path: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&raw).ok()
 }
 
-fn watch_login_output<R>(pipe: R, opened: Arc<AtomicBool>)
+fn watch_login_output<R>(pipe: R, opened: Arc<AtomicBool>, always_open_url: bool)
 where
     R: Read + Send + 'static,
 {
@@ -204,15 +208,18 @@ where
                 break;
             }
             pending.push_str(&String::from_utf8_lossy(&chunk[..n]));
-            maybe_open(&pending, &opened, false);
+            maybe_open(&pending, &opened, false, always_open_url);
         }
-        maybe_open(&pending, &opened, true);
+        maybe_open(&pending, &opened, true, always_open_url);
     });
 }
 
-fn maybe_open(text: &str, opened: &AtomicBool, at_end: bool) {
+fn maybe_open(text: &str, opened: &AtomicBool, at_end: bool, always_open_url: bool) {
     let lower = text.to_ascii_lowercase();
-    if !lower.contains("failed to open browser") && !lower.contains("couldn't open your browser") {
+    if !always_open_url
+        && !lower.contains("failed to open browser")
+        && !lower.contains("couldn't open your browser")
+    {
         return;
     }
     let url = if at_end {

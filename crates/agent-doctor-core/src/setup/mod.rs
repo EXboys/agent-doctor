@@ -30,7 +30,9 @@ pub use mode::{
     switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport, MODE_PERSONAL,
     MODE_TEAM, MODE_UNSET,
 };
-pub(crate) use native_login::{codex_chatgpt_stash_path, publish_codex_subscription_auth};
+pub(crate) use native_login::{
+    codex_chatgpt_stash_path, hide_codex_spawned_browsers, publish_codex_subscription_auth,
+};
 pub use native_login::{
     is_native_provider_id, is_native_subscription, is_runtime_logged_in, native_account_status,
     native_provider_id, parse_native_provider_id, resign_native_subscription,
