@@ -14,6 +14,8 @@ export type AttachmentsDeps = {
   getPendingAttachments: () => ChatAttachment[];
   setPendingAttachments: (items: ChatAttachment[]) => void;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
+  /** Fired after any pending-attachment render, so side UI (screenshot chips) can follow. */
+  onChanged?: () => void;
 };
 
 export type AttachmentsApi = ReturnType<typeof createAttachmentsController>;
@@ -67,6 +69,11 @@ export function createAttachmentsController(deps: AttachmentsDeps) {
       chip.append(name, remove);
       deps.attachmentsEl.appendChild(chip);
     }
+    deps.onChanged?.();
+  }
+
+  function hasImageAttachment(): boolean {
+    return deps.getPendingAttachments().some((item) => item.kind === "image");
   }
 
   function addAttachmentPaths(paths: string[]): void {
@@ -148,6 +155,7 @@ export function createAttachmentsController(deps: AttachmentsDeps) {
   return {
     renderPendingAttachments,
     addAttachmentPaths,
+    hasImageAttachment,
     pickAttachments,
     setComposerDropTarget,
     setupFileDrop,

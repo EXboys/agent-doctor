@@ -950,6 +950,7 @@
           </section>
           <div class="chat-composer-box">
             <div id="chat-follow-queue" class="chat-follow-queue" hidden></div>
+            <div id="chat-screenshot-chips" class="chat-screenshot-chips" hidden></div>
             <div class="chat-prompt-wrap">
               <textarea
                 id="chat-prompt"
@@ -972,6 +973,21 @@
                   title="上传文件或图片"
                 >
                   <span aria-hidden="true">+</span>
+                </button>
+                <button
+                  id="chat-screenshot"
+                  type="button"
+                  class="btn-composer-icon btn-screenshot"
+                  data-i18n-title="chat.screenshot"
+                  aria-label="截屏提问"
+                  title="截屏提问"
+                >
+                  <svg class="chat-screenshot-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M9.35 4.5c.28 0 .54.15.68.4l.72 1.28h3.5l.72-1.28a.78.78 0 0 1 .68-.4h1.12c1.24 0 2.25 1 2.25 2.25v9.5c0 1.24-1 2.25-2.25 2.25H7.25C6 18.5 5 17.5 5 16.25v-9.5C5 5.5 6 4.5 7.25 4.5h2.1ZM12 8.6a4.15 4.15 0 1 0 0 8.3 4.15 4.15 0 0 0 0-8.3Zm0 1.7a2.45 2.45 0 1 1 0 4.9 2.45 2.45 0 0 1 0-4.9Z"
+                    />
+                  </svg>
                 </button>
                 <button
                   id="chat-voice"

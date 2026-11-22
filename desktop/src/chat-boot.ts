@@ -31,6 +31,7 @@ import {
   resourcesRefreshEl,
   openResourcesEl,
   logEl,
+  screenshotEl,
 } from "./chat-dom";
 
 import {
@@ -55,6 +56,7 @@ import {
   selectedRuntime,
   activeSession,
   pickAttachments,
+  captureScreen,
   setupFileDrop,
   renderActiveMessages,
   hydrateDurableChatStore,
@@ -379,6 +381,7 @@ function bootChatTail(): void {
     else void sendAsk();
   });
   attachEl.addEventListener("click", () => void pickAttachments());
+  screenshotEl.addEventListener("click", () => void captureScreen());
   newWorkspaceEl.addEventListener("click", () => addProjectFromAsk());
   resourcesRefreshEl.addEventListener("click", (event) => {
     event.preventDefault();

@@ -9033,6 +9033,35 @@ html[data-theme="dark"] .chat-composer-box:focus-within {
   box-shadow: var(--shadow);
 }
 
+.chat-screenshot-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.chat-screenshot-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chat-screenshot-chip:hover {
+  border-color: rgba(47, 111, 237, 0.35);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.btn-screenshot .chat-screenshot-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .chat-attach-thumb {
   width: 36px;
   height: 36px;

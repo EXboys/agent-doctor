@@ -35,6 +35,7 @@ import {
   followQueueEl,
   actionEl,
   attachEl,
+  screenshotEl,
   composerBoxEl,
   composerEl,
   contextMeterEl,
@@ -659,6 +660,8 @@ export function applyI18n(): void {
   promptEl.placeholder = t(isComposerLocked() ? "chat.placeholderBusy" : "chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
+  screenshotEl.title = t("chat.screenshot");
+  screenshotEl.setAttribute("aria-label", t("chat.screenshot"));
   const pickSkillEl = document.querySelector<HTMLButtonElement>("#chat-pick-skill");
   if (pickSkillEl) {
     const pickLabel = t("chat.pickSkillHint");
@@ -970,6 +973,9 @@ export function renderPendingAttachments(): void {
 }
 export async function pickAttachments(): Promise<void> {
   await chatState.attachments.pickAttachments();
+}
+export async function captureScreen(): Promise<void> {
+  await chatState.screenshot.captureScreen();
 }
 export async function setupFileDrop(): Promise<void> {
   await chatState.attachments.setupFileDrop();

@@ -20,10 +20,10 @@ use crate::computer_hand_common as proto;
 use windows::core::{IUnknown, BSTR, HSTRING, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
-    GetMonitorInfoW, MonitorFromWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER,
-    BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-    MONITOR_DEFAULTTOPRIMARY, SRCCOPY,
+    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+    EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, MonitorFromWindow, ReleaseDC,
+    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ,
+    MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, SRCCOPY,
 };
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::Storage::FileSystem::{
@@ -307,6 +307,61 @@ struct Desktop {
     width: i32,
     height: i32,
     scale: f64,
+}
+
+/// Every monitor for the chat screenshot picker, one overlay window each.
+pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
+    let mut desks: Vec<Desktop> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(
+            HDC::default(),
+            None,
+            Some(collect_desks),
+            LPARAM(&mut desks as *mut Vec<Desktop> as isize),
+        );
+    }
+    desks
+        .into_iter()
+        .map(|desk| {
+            let scale = if desk.scale > 0.0 { desk.scale } else { 1.0 };
+            proto::DisplayBox {
+                id: 0,
+                origin_x: desk.origin_x as f64,
+                origin_y: desk.origin_y as f64,
+                width: desk.width as f64,
+                height: desk.height as f64,
+                scale,
+            }
+        })
+        .collect()
+}
+
+/// Freeze one full monitor for the chat screenshot picker.
+pub fn capture_display_full(display: proto::DisplayBox) -> Result<String, String> {
+    let desk = Desktop {
+        origin_x: display.origin_x.round() as i32,
+        origin_y: display.origin_y.round() as i32,
+        width: display.width.round().max(1.0) as i32,
+        height: display.height.round().max(1.0) as i32,
+        scale: display.scale,
+    };
+    let shot = capture_png(&desk).map_err(|err| err.to_string())?;
+    Ok(shot.path)
+}
+
+unsafe extern "system" fn collect_desks(
+    monitor: windows::Win32::Graphics::Gdi::HMONITOR,
+    _hdc: HDC,
+    _rect: *mut RECT,
+    lparam: LPARAM,
+) -> BOOL {
+    if let Some(desk) = monitor_desk(monitor) {
+        let desks = lparam.0 as *mut Vec<Desktop>;
+        if !desks.is_null() {
+            (*desks).push(desk);
+        }
+    }
+    BOOL(1)
 }
 
 fn screen_look(app: &str) -> Result<Value> {

@@ -177,6 +177,22 @@ pub(crate) struct Shot {
     pub(crate) scale: f64,
 }
 
+/// One display for the chat screenshot picker. Origins and sizes are in the
+/// unit that platform captures in — macOS global points, Windows
+/// virtual-screen pixels — and `scale` maps logical points onto those units.
+#[derive(Clone, Copy)]
+pub(crate) struct DisplayBox {
+    pub(crate) id: u32,
+    pub(crate) origin_x: f64,
+    pub(crate) origin_y: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    /// Only Windows converts between points and pixels; macOS points are
+    /// already logical, so this reads as unused there.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) scale: f64,
+}
+
 /// Fingerprint of the newest screenshot, so a click can prove the screen moved.
 static LAST_PRINT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// Whether the last read saw a text field, which `screen_set` needs.

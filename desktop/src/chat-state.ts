@@ -12,6 +12,7 @@ import type { RunningApi } from "./chat/running";
 import type { ModelPickerApi } from "./chat/model-picker";
 import type { DecisionApi } from "./chat/decision";
 import type { AttachmentsApi } from "./chat/attachments";
+import type { ScreenshotApi } from "./chat/screenshot";
 import type { VoiceInputApi } from "./chat/voice";
 import type { HostedApi } from "./chat/hosted";
 import type { ContextMeterApi } from "./chat/context-meter";
@@ -47,6 +48,7 @@ export const chatState = {
   modelPicker: undefined as unknown as ModelPickerApi,
   decision: undefined as unknown as DecisionApi,
   attachments: undefined as unknown as AttachmentsApi,
+  screenshot: undefined as unknown as ScreenshotApi,
   voiceInput: undefined as unknown as VoiceInputApi,
   hosted: null as HostedApi | null,
   latestActivityText: "",

@@ -148,6 +148,7 @@ import {
 } from "./chat/model-picker";
 import { createDecisionController } from "./chat/decision";
 import { createAttachmentsController } from "./chat/attachments";
+import { createScreenshotController } from "./chat/screenshot";
 import { createContextMeterController } from "./chat/context-meter";
 import { createShellUiController } from "./chat/shell-ui";
 import { createBackupUiController } from "./chat/backup-ui";
@@ -309,6 +310,14 @@ export function wireChatControllers(): void {
     sendAsk: () => sendAsk(),
   });
 
+  chatState.screenshot = createScreenshotController({
+    getAttachments: () => chatState.attachments,
+    promptEl,
+    autoResizePrompt: () => autoResizePrompt(),
+    isComposerLocked: () => isComposerLocked(),
+    setStatus: (text, tone) => setStatus(text, tone),
+  });
+
   chatState.attachments = createAttachmentsController({
     attachmentsEl,
     composerBoxEl,
@@ -318,6 +327,7 @@ export function wireChatControllers(): void {
       chatState.pendingAttachments = items;
     },
     setStatus: (text, tone) => setStatus(text, tone),
+    onChanged: () => chatState.screenshot.renderChips(),
   });
 
   chatState.voiceInput = createVoiceInputController({

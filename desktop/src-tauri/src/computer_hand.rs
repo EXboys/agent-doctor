@@ -666,6 +666,64 @@ fn capture_png(app: &str) -> Result<proto::Shot> {
     }
 }
 
+/// Every display for the chat screenshot picker, one overlay window each.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn capture_screen_displays() -> Vec<proto::DisplayBox> {
+    #[cfg(target_os = "macos")]
+    {
+        active_displays()
+            .iter()
+            .map(|display| proto::DisplayBox {
+                id: display.id,
+                origin_x: display.origin_x,
+                origin_y: display.origin_y,
+                width: display.width,
+                height: display.height,
+                scale: display_scale(display.id),
+            })
+            .collect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
+/// Freeze one full display for the chat screenshot picker.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn capture_display_full(display: proto::DisplayBox) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if !unsafe { CGPreflightScreenCaptureAccess() } {
+            static ASKED_SCREEN: AtomicBool = AtomicBool::new(false);
+            if ASKED_SCREEN
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                unsafe { CGRequestScreenCaptureAccess() };
+            }
+            return Err(
+                "还没有允许录制屏幕。打开系统设置里的「录屏与系统录音」，打开这个应用的开关，然后完全退出再打开。开关打开之前不要再点屏幕。"
+                    .to_string(),
+            );
+        }
+        let shot = capture_rect(
+            display.origin_x,
+            display.origin_y,
+            display.width,
+            display.height,
+            Some(display.id),
+        )
+        .map_err(|err| err.to_string())?;
+        Ok(shot.path)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = display;
+        Err("the screen is captured on macOS".to_string())
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn capture_rect(
     x: f64,

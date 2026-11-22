@@ -1,0 +1,33 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  /* A light dim, not a wall: the desktop must stay visible under the picker. */
+  background: rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.shot-rect {
+  position: fixed;
+  border: 1.5px solid #2f6fed;
+  background: rgba(47, 111, 237, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.shot-hint {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  font: 12.5px/1.4 -apple-system, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}

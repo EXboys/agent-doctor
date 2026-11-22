@@ -1,3 +1,4 @@
+mod capture;
 mod chat_store;
 mod cluster;
 mod deep_diagnose;
@@ -18,6 +19,7 @@ mod wiring;
 mod workspace;
 mod workspace_files;
 
+pub use capture::*;
 pub use chat_store::*;
 pub(crate) use cluster::ensure_local_compute_allowed;
 pub use cluster::*;

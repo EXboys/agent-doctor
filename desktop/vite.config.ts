@@ -38,6 +38,7 @@ export default defineConfig(async () => ({
         diagnose: resolve(__dirname, "diagnose.html"),
         llamaBoard: resolve(__dirname, "llama-board.html"),
         island: resolve(__dirname, "island.html"),
+        screenshot: resolve(__dirname, "screenshot.html"),
       },
     },
   },
