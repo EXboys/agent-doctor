@@ -44,12 +44,18 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
     let mut overlays = Vec::new();
     for (idx, display) in displays.iter().enumerate() {
         // One bad display must not take the whole picker down; skip it and
-        // keep the rest.
+        // keep the rest. The stderr line lands in the app log, so a person
+        // testing with a fresh monitor leaves the exact frames behind.
         let Ok(shot) = crate::computer_hand::capture_display_full(*display) else {
+            eprintln!("[screenshot] display {idx}: freeze failed");
             continue;
         };
         let label = format!("screenshot-{idx}");
         let (x, y, width, height) = logical_frame(display);
+        eprintln!(
+            "[screenshot] display {idx}: capture=({},{} {}x{}) scale={} place=({},{} {width}x{height})",
+            display.origin_x, display.origin_y, display.width, display.height, display.scale, x, y,
+        );
         let url = WebviewUrl::App(format!("screenshot.html#shot={shot}").into());
         let built = WebviewWindowBuilder::new(&app, label.clone(), url)
             .title("Agent Doctor")
@@ -69,6 +75,7 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
         #[cfg_attr(not(windows), allow(unused_variables))]
         let Ok(win) = built
         else {
+            eprintln!("[screenshot] display {idx}: picker window failed");
             continue;
         };
         // Windows: the builder converts logical through whichever scale the
@@ -80,6 +87,8 @@ pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Re
                 display.origin_y.round() as i32,
             ));
         }
+        #[cfg(target_os = "macos")]
+        float_above_every_space(&win);
         overlays.push(Overlay {
             label,
             display: *display,
@@ -233,5 +242,32 @@ fn close_overlays(app: &AppHandle, session: Option<RegionSession>) {
         if let Some(win) = app.get_webview_window(&overlay.label) {
             let _ = win.close();
         }
+    }
+}
+
+/// The picker must survive Space switches and full-screen apps, so give its
+/// window the same native treatment the island chip gets: screen-saver level
+/// plus a join-every-space collection behavior.
+#[cfg(target_os = "macos")]
+fn float_above_every_space(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
+
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let ns: &NSWindow = &*ptr.cast();
+        ns.setLevel(NSScreenSaverWindowLevel);
+        ns.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::IgnoresCycle
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::CanJoinAllApplications,
+        );
+        ns.orderFrontRegardless();
     }
 }

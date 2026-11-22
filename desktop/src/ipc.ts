@@ -1449,6 +1449,23 @@ export function readImageTexts(args: { paths: string[] }): Promise<ImageTextRepo
   return invoke("read_image_texts_command", args);
 }
 
+export function startRegionCapture(): Promise<void> {
+  return invoke("start_region_capture_command");
+}
+
+export function completeRegionCapture(args: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Promise<void> {
+  return invoke("complete_region_capture_command", args);
+}
+
+export function cancelRegionCapture(): Promise<void> {
+  return invoke("cancel_region_capture_command");
+}
+
 export type AskImageSupport = {
   runtime: string;
   sees_images: boolean;

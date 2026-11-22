@@ -1,5 +1,6 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { cancelRegionCapture, completeRegionCapture } from "./ipc";
 
 let dragging = false;
 let done = false;
@@ -13,15 +14,15 @@ function finish(x: number, y: number, width: number, height: number): void {
   document.body.style.cursor = "default";
   hintEl.hidden = true;
   drawRect(x, y, width, height);
-  invoke("complete_region_capture_command", { x, y, width, height }).catch(() => {
-    invoke("cancel_region_capture_command").catch(() => {});
+  completeRegionCapture({ x, y, width, height }).catch(() => {
+    cancelRegionCapture().catch(() => {});
   });
 }
 
 function cancel(): void {
   if (done) return;
   done = true;
-  invoke("cancel_region_capture_command").catch(() => {});
+  cancelRegionCapture().catch(() => {});
 }
 
 function drawRect(x: number, y: number, width: number, height: number): void {

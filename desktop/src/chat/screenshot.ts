@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { screenshotChipsEl } from "../chat-dom";
 import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
+import { startRegionCapture } from "../ipc";
 import type { AttachmentsApi } from "./attachments";
 
 export type ScreenshotDeps = {
@@ -46,7 +46,7 @@ export function createScreenshotController(deps: ScreenshotDeps) {
   async function captureScreen(): Promise<void> {
     if (deps.isComposerLocked()) return;
     try {
-      await invoke("start_region_capture_command");
+      await startRegionCapture();
       deps.setStatus(t("chat.screenshotRegionHint"), "muted");
     } catch (error) {
       deps.setStatus(withErrorDetail(t("chat.screenshotFailed"), error), "error");
