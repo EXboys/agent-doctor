@@ -7,6 +7,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chatSideDefault, heroRoom, heroShouldShow, heroSpare, layout } from "../src/layout-rules.ts";
 
+/** Follow the entry sheet's imports, in order, so a split keeps the same cascade. */
+function readSheet(path: string): string {
+  const text = readFileSync(path, "utf8");
+  const imports = [...text.matchAll(/@import\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  if (imports.length === 0) return text;
+  const dir = dirname(path);
+  return imports.map((file) => readFileSync(join(dir, file), "utf8")).join("");
+}
+
 assert.equal(layout.homeEdgeMargin, 48);
 assert.equal(layout.chatSide, 250);
 assert.equal(layout.chatSideWindows, 272);
@@ -40,7 +49,7 @@ assert.equal(heroSpare({ panel: 400, card: 300, hero: 80, gap: 12 }), 192);
 // A card taller than the panel leaves no room, never a negative one to show.
 assert.equal(heroSpare({ panel: 200, card: 300, hero: 0, gap: 0 }), -100);
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/chat.css"), "utf8");
+const css = readSheet(join(dirname(fileURLToPath(import.meta.url)), "../src/chat.css"));
 
 function block(source: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -66,7 +75,7 @@ assert.equal(px(windows, "--chat-side-w"), layout.chatSideWindows);
 
 // The Windows home fills the tall window: the agent card grows into the
 // leftover height, and nothing shrinks below its content.
-const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/styles.css"), "utf8");
+const styles = readSheet(join(dirname(fileURLToPath(import.meta.url)), "../src/styles.css"));
 
 const winAgents = block(styles, 'html[data-os="windows"] .agents-main');
 assert.match(winAgents, /flex:\s*1 0 auto/);

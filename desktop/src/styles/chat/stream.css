@@ -1,0 +1,28 @@
+/* Streaming markdown head/tail wrappers (Paseo's split): the completed head
+   renders once per block, only the tail repaints per frame. The wrappers
+   stay layout-transparent so the bubble's own markdown styles apply. */
+.chat-stream-part {
+  display: contents;
+}
+
+/* The "show earlier" button at the top of a capped transcript. */
+.chat-history-earlier {
+  appearance: none;
+  display: block;
+  width: fit-content;
+  margin: 6px auto 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.chat-history-earlier:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+

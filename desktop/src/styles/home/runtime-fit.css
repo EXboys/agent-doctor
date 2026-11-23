@@ -1,0 +1,355 @@
+/* Under the doctor card the install prompt is a footnote to a real agent,
+   not a standalone empty state — no second boxed card beneath the first. */
+.runtime-empty.is-compact {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  box-shadow: none;
+}
+
+.runtime-empty > p:first-child {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.runtime-empty-hint {
+  margin: 6px 0 14px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.empty-state .btn-primary {
+  margin-top: 4px;
+}
+
+.ask-section {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.ask-section.is-focused {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.ask-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.ask-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.ask-select {
+  min-width: 132px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+
+.ask-elevated {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.ask-prompt {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.ask-prompt:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
+  border-color: var(--primary);
+}
+
+.ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ask-meta {
+  margin: 0 0 4px;
+  font-size: 0.68rem;
+}
+
+.ask-log {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#ask-hint.is-ok {
+  color: var(--success);
+}
+
+#ask-hint.is-warn {
+  color: var(--warn);
+}
+
+#ask-hint.is-error {
+  color: var(--danger);
+}
+
+.widget-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.64rem;
+  color: var(--text-soft);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.footer-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 6px;
+}
+
+.footer-sep {
+  opacity: 0.45;
+}
+
+.app-version {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-soft);
+}
+
+.footer-update.btn-link,
+.btn-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent, #2f6fed);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.footer-update {
+  font-size: inherit;
+  padding: 0;
+  min-height: 0;
+}
+
+.update-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.update-sheet-card {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 18px 16px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+  text-align: center;
+}
+
+.update-sheet-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  object-fit: cover;
+}
+
+.update-sheet-title {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.update-sheet-body {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--text, #152033);
+}
+
+.update-sheet-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.update-sheet-actions .btn-primary,
+.update-sheet-actions .btn-secondary {
+  flex: 1;
+}
+
+/* Windows laptops at 125–150% are often under 820px tall. Keep the agent
+   home inside that height so the page itself does not scroll. */
+@media (max-height: 820px) {
+  .widget {
+    padding: 8px 10px;
+  }
+
+  .widget-toolbar {
+    margin-bottom: 4px;
+  }
+
+  .status-bar,
+  .health-strip {
+    margin-bottom: 4px;
+  }
+
+  .main-tabs {
+    margin-bottom: 6px;
+  }
+
+  .widget-footer {
+    margin-top: 6px;
+    padding-top: 4px;
+  }
+
+  .ws-chip {
+    margin-bottom: 6px;
+    padding: 4px 8px;
+  }
+
+  .health-card,
+  .agents-security-overview {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 6px;
+    padding: 8px 10px;
+  }
+
+  .health-card-ring,
+  .agents-readiness-ring {
+    width: 52px;
+    height: 52px;
+  }
+
+  .agents-security-overview {
+    grid-template-columns: 70px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+
+  .agents-security-overview .agents-readiness-ring {
+    width: 64px;
+    height: 64px;
+  }
+
+  .runtime-section {
+    padding: 6px 8px;
+  }
+
+  .runtime-section.is-solo {
+    padding: 0;
+  }
+
+  .runtime.has-hero {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .runtime-solo-hero {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .runtime-solo-logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .runtime-solo-blurb {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .runtime.has-hero .card-actions {
+    margin-top: 0;
+  }
+
+  .meta-row {
+    padding: 3px 8px;
+  }
+
+  .meta-version-hint {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+}
+

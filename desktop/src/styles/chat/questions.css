@@ -1,0 +1,395 @@
+/* Question-form cards (Paseo's QuestionFormCard): the question leads, the
+   form fills the card, actions sit left. No blue pending tint — the card is
+   a calm surface like any form. */
+.chat-permission.has-question-form.is-pending {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.chat-permission-actions.is-question {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.chat-permission-actions.is-question .chat-permission-allow,
+.chat-permission-actions.is-question .chat-permission-deny {
+  border-radius: 10px;
+  padding: 7px 16px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chat-permission-actions.is-question .chat-permission-allow::before {
+  content: "✓ ";
+}
+
+.chat-permission-actions.is-question .chat-permission-deny::before {
+  content: "✕ ";
+  color: var(--muted);
+}
+
+.chat-permission-actions.is-question button[aria-busy="true"]::before {
+  content: none;
+}
+
+.chat-permission-options {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  margin: 2px 0;
+}
+
+/* Option rows (Paseo's QuestionOptionRow): borderless rounded rows — hover
+   and selection tint the background instead of boxing every option. The
+   radio/checkbox on the left swaps fill/border without reflowing the row;
+   unselected labels sit muted and light up when picked. */
+.chat-permission-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-permission-option:hover {
+  background: var(--fill);
+}
+
+.chat-permission-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.chat-permission-option.is-selected {
+  background: var(--fill);
+}
+
+.chat-permission-option-label {
+  color: var(--muted);
+}
+
+.chat-permission-option.is-selected .chat-permission-option-label {
+  color: var(--text);
+}
+
+.chat-permission-option-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px; /* optical-align the 18px control to the first text line */
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  color: #fff;
+}
+
+.chat-permission-option[role="checkbox"] .chat-permission-option-check {
+  border-radius: 5px;
+}
+
+.chat-permission-option.is-selected .chat-permission-option-check {
+  border-color: var(--accent);
+}
+
+.chat-permission-option.is-selected[role="radio"] .chat-permission-option-check::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.chat-permission-option.is-selected[role="checkbox"] .chat-permission-option-check {
+  background: var(--accent);
+}
+
+.chat-permission-option.is-selected[role="checkbox"] .chat-permission-option-check::after {
+  content: "✓";
+}
+
+.chat-permission-option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-permission-option-description {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+/* Option previews show for every option at once so they can be compared
+   (Paseo). Most previews are prose, so they wrap instead of scrolling
+   sideways; the height caps with an inner scroll. */
+.chat-permission-option-preview {
+  margin: 4px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.chat-permission-error {
+  margin: 2px 0 0;
+  width: 100%;
+  color: var(--danger);
+  font-size: 0.72rem;
+}
+
+/* The answer echo sits on its own line under the resolved badge. */
+.chat-permission-echo {
+  flex: 1 0 100%;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow-wrap: break-word;
+}
+
+/* The pending spinner rides inside the pressed pill button. */
+.chat-permission-allow .chat-spinner {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+.chat-permission-deny .chat-spinner {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+  border-top-color: var(--muted);
+}
+
+.chat-permission-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 10px 12px;
+}
+
+.chat-permission-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Paseo: the typed-answer field lights its border while it holds text. */
+.chat-permission-input.has-value {
+  border-color: rgba(47, 111, 237, 0.45);
+}
+
+.chat-permission-allow,
+.chat-permission-deny,
+.chat-permission-resend {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-permission-allow {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chat-permission-deny {
+  background: var(--panel);
+  border-color: rgba(10, 10, 10, 0.12);
+  color: var(--text);
+}
+
+.chat-permission-resend {
+  margin-top: 8px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.chat-permission-allow:disabled,
+.chat-permission-deny:disabled,
+.chat-permission-resend:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chat-permission-result {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.chat-permission-hint {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* The manual diagnosis report row: one line of why, then the button. */
+.chat-permission-report {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-permission-report .chat-permission-resend {
+  margin-top: 0;
+  flex: none;
+}
+
+.chat-permission.is-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-permission-batch-title {
+  font-weight: 700;
+}
+
+.chat-permission-batch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-permission-batch-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(10, 10, 10, 0.04);
+}
+
+.chat-permission-batch-item .chat-permission-summary {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.chat-permission-batch-item .chat-permission-more {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.chat-quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 8px 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  background: rgba(217, 119, 6, 0.08);
+}
+
+.chat-quick-replies-hint {
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: #b45309;
+  margin-right: 2px;
+}
+
+.chat-quick-reply {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid rgba(10, 10, 10, 0.12);
+  background: var(--panel);
+  color: var(--text);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chat-quick-reply:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.chat-activity-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.chat-activity-elapsed {
+  flex: none;
+  margin-left: 6px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-activity-elapsed:empty,
+.chat-activity.is-done > .chat-activity-elapsed {
+  display: none;
+}
+
+.chat-status {
+  margin: 0;
+  min-height: 2.2em;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.chat-status:empty { display: none; }
+.chat-status.is-ok { color: var(--ok); }
+.chat-status.is-warn { color: var(--warn); }
+.chat-status.is-error { color: var(--danger); }
+
+.chat-restore-backup-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 8px 8px;
+}
+
+.chat-footnote {
+  display: none;
+}
+

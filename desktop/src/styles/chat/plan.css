@@ -1,0 +1,223 @@
+.chat-tool-group > summary:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.chat-tool-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-tool-group[open] > summary {
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-plan-dock {
+  position: absolute;
+  top: calc(var(--chat-topbar-h) + 8px);
+  right: 18px;
+  z-index: 6;
+  width: max-content;
+  max-width: min(420px, calc(100% - 48px));
+}
+
+/* The chip sits in its own band. The first message starts under it, so the two do not stack. */
+.chat-main:has(#chat-plan-dock:not([hidden])) > .chat-log {
+  padding-top: 56px;
+}
+
+.chat-plan-dock[hidden] {
+  display: none;
+}
+
+.chat-plan-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin: 0;
+  padding: 7px 14px 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--md-strong);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.chat-plan-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-plan-dock.is-open .chat-plan-pill {
+  display: none;
+}
+
+.chat-plan-panel {
+  display: none;
+  width: min(360px, 100%);
+  padding: 12px 14px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--md-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+}
+
+.chat-plan-dock.is-open .chat-plan-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-plan-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-plan-panel-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-plan-panel-count {
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-plan-fold,
+.chat-plan-done-toggle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-plan-fold {
+  margin-left: auto;
+}
+
+.chat-plan-fold:hover,
+.chat-plan-done-toggle:hover {
+  color: var(--text);
+}
+
+.chat-plan-done-toggle {
+  justify-self: start;
+}
+
+.chat-plan-done-toggle::before {
+  content: "▾ ";
+}
+
+.chat-plan-dock.is-done-folded .chat-plan-done-toggle::before {
+  content: "▸ ";
+}
+
+.chat-plan-dock.is-done-folded .plan-item[data-state="done"] {
+  display: none;
+}
+
+.chat-plan {
+  display: none;
+}
+
+.chat-plan .plan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-plan .plan-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-plan .plan-progress {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chat-plan-panel .plan-list {
+  display: grid;
+  gap: 0;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-plan-panel .plan-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.chat-plan-panel .plan-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-plan-pill .plan-mark,
+.chat-plan-panel .plan-mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.chat-plan-pill .plan-mark[data-state="doing"],
+.chat-plan-panel .plan-item[data-state="doing"] .plan-mark {
+  border-color: var(--accent);
+}
+
+.chat-plan-pill .plan-mark[data-state="done"],
+.chat-plan-panel .plan-item[data-state="done"] .plan-mark {
+  display: grid;
+  place-items: center;
+  border-color: var(--ok);
+  color: var(--ok);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+html[data-theme="dark"] .chat-plan-pill,
+html[data-theme="dark"] .chat-plan-panel {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: #262626;
+}
+

@@ -1,0 +1,218 @@
+.chat-side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 18px;
+  border-right: 0;
+  background: var(--side-bg);
+  backdrop-filter: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-side > :not(.chat-session-block) {
+  flex-shrink: 0;
+}
+
+.chat-side-foot {
+  display: grid;
+  gap: 2px;
+  margin-top: auto;
+}
+
+.chat-account-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.chat-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-account:hover {
+  background: var(--fill);
+}
+
+/* The signed-in avatar opens a small menu instead of jumping anywhere. */
+.chat-account-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-account-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--border, rgba(10, 10, 10, 0.1));
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(10, 10, 10, 0.16);
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+}
+
+.chat-account-menu[hidden] {
+  display: none;
+}
+
+.chat-account-menu-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-account-menu-item:hover {
+  background: var(--fill);
+}
+
+.chat-account-menu-item.is-logout:hover {
+  background: rgba(196, 49, 74, 0.12);
+  color: #c4314a;
+}
+
+html[data-theme="dark"] .chat-account-menu-item.is-logout:hover {
+  background: rgba(248, 113, 133, 0.14);
+  color: #f8717f;
+}
+
+.chat-account-avatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #3b6fd4;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chat-account-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.chat-update {
+  flex: none;
+  margin: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: #2f6fed;
+  color: #fff;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-update:hover {
+  filter: brightness(1.08);
+}
+
+.chat-settings-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-settings-open:hover,
+.chat-settings-open.is-on {
+  background: var(--fill);
+  border-color: var(--line);
+}
+
+/* Page modes keep the three-column grid while expanded. Knowledge, schedule
+   and resources collapse through the base is-side-collapsed single-column
+   rule; settings pins the rail in every state. */
+.chat-shell.is-settings,
+.chat-shell.is-settings.is-side-collapsed,
+.chat-shell.is-settings.is-resources-open,
+.chat-shell.is-settings.is-resources-open.is-side-collapsed,
+.chat-shell.is-knowledge,
+.chat-shell.is-knowledge.is-resources-open,
+.chat-shell.is-schedule,
+.chat-shell.is-schedule.is-resources-open,
+.chat-shell.is-resources-page,
+.chat-shell.is-resources-page.is-resources-open {
+  grid-template-columns: var(--chat-side-w) var(--chat-splitter-w) minmax(0, 1fr);
+}
+
+/* Collapsed knowledge/schedule/resources fold to the chat layout: rail and
+   splitter hidden, page full width. Same specificity as the rules above but
+   later, so it wins. */
+.chat-shell.is-knowledge.is-side-collapsed,
+.chat-shell.is-schedule.is-side-collapsed,
+.chat-shell.is-resources-page.is-side-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-shell.is-knowledge.is-resources-open.is-side-collapsed,
+.chat-shell.is-schedule.is-resources-open.is-side-collapsed,
+.chat-shell.is-resources-page.is-resources-open.is-side-collapsed {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.chat-shell.is-settings > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat),
+.chat-shell.is-knowledge > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat),
+.chat-shell.is-schedule > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat),
+.chat-shell.is-resources-page > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat) {
+  display: none !important;
+}
+
+.chat-shell.is-settings > .chat-side,
+.chat-shell.is-knowledge > .chat-side,
+.chat-shell.is-schedule > .chat-side,
+.chat-shell.is-resources-page > .chat-side {
+  display: flex;
+}
+

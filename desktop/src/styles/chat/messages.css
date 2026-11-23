@@ -1,0 +1,410 @@
+/* The turn's copy / time / rating row hangs 30px under the reply and does
+   not take flow space. The file card is the next block, so give it that
+   strip plus a little air — otherwise the row paints on top of the card. */
+.chat-log > .chat-reply-changes {
+  margin-top: 40px;
+}
+
+/* Windows scrollbars take width from the text. Reserve that strip so a growing
+   answer does not reflow when the bar appears. */
+html[data-os="windows"] .chat-log {
+  scrollbar-gutter: stable;
+}
+
+/* Collect buttons on tool rows and runtime logs: copy the full stored
+   output (32k/64k tails) without expanding anything. */
+.chat-log .chat-tool-copy,
+.chat-log .chat-log-copy {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.68rem;
+  padding: 1px 8px;
+  margin-left: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-log .chat-tool-copy:hover,
+.chat-log .chat-log-copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Each row is an independent layout root: a change inside one row (hover,
+   fold, age tick, a streaming edit) must not reflow the whole column of a
+   long session. Layout (not paint) containment - paint would clip the turn
+   owner's action row that hangs below the bubble; the absolute
+   .chat-msg-actions already resolves against the row wrapper.
+   content-visibility was REMOVED (2026-11-12, M1/macOS 27 field data): on
+   WKWebView it did not reliably skip flex-column rows, and its per-layout
+   relevance pass made every invalidation cost seconds on long sessions -
+   single 55-60s frames traced to row measuring. The 80-row mount window
+   bounds the DOM instead; pinned rows render normally. */
+.chat-log > :is(
+  .chat-msg,
+  .chat-work,
+  .chat-stage-group,
+  .chat-work-stream,
+  .chat-thinking,
+  .chat-tool-group,
+  .chat-bubble,
+  .chat-activity,
+  .chat-permission,
+  .chat-reply-changes,
+  .chat-plan
+) {
+  contain: layout style;
+}
+
+/* A new chat lifts the two start cards into the open area, clear of the composer. */
+.chat-log:has(> .chat-start)::before,
+.chat-log:has(> .chat-start)::after {
+  content: "";
+  display: block;
+  min-height: 0;
+}
+
+/* The old flex-grow pair (0.42 / 1.15) sat the cards ~27% down the empty
+   chat; block layout needs explicit spacers instead. */
+.chat-log:has(> .chat-start)::before {
+  height: 32vh;
+}
+
+.chat-bubble {
+  max-width: min(760px, 92%);
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.chat-bubble.user,
+.chat-bubble.meta {
+  white-space: pre-wrap;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  width: auto;
+  max-width: min(760px, 100%);
+  overflow-wrap: anywhere;
+  background: var(--user-bubble);
+  color: var(--user-bubble-fg);
+  padding: 10px 14px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.chat-bubble.user.is-question-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-msg-assistant,
+.chat-msg-user {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A new question reads as a new exchange: one generous, uniform gap above
+   every later user bubble, visibly larger than the spacing inside a turn.
+   The first bubble sits under the top bar — no exchange band above it. */
+.chat-log > .chat-msg-user {
+  /* One full exchange band: ~78px of air above every new user bubble once
+     the log's own gap is added. */
+  margin-top: 68px;
+}
+
+.chat-log > .chat-msg-user:first-child {
+  margin-top: 0;
+}
+
+.chat-log > .chat-msg-user + .chat-msg-assistant {
+  margin-top: 6px;
+}
+
+.chat-msg-assistant {
+  /* Fill the chat column — adapt to panel width, not a fixed reading measure. */
+  align-self: stretch;
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  margin-block: -1px;
+  position: relative;
+}
+
+/* The copy and the time are their own row under the reply. Hidden actions
+   take no space, so a sentence between tools does not grow a gap. */
+.chat-msg-assistant > .chat-msg-actions {
+  /* Reserve no space (the reserved 24px row read as a dead gap between
+     process segments); copy/time appear when the reply is hovered. They sit
+     at the left edge, the standard agent-UI spot for a reply's copy. */
+  position: absolute;
+  left: 2px;
+  /* 30px down = ~8px of air between the reply's last line and the row top. */
+  bottom: -30px;
+  height: 22px;
+  margin: 0;
+  padding: 0 1px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-msg-assistant:is(:hover, :focus-within) > .chat-msg-actions {
+  opacity: 1;
+}
+
+.chat-msg-user {
+  align-self: flex-end;
+  align-items: flex-end;
+  width: fit-content;
+  max-width: min(42rem, 100%);
+  min-width: 0;
+  margin-left: auto;
+}
+
+.chat-msg-user.is-compact {
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-msg-assistant .chat-bubble.assistant {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-msg-user .chat-bubble.user {
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.chat-msg-user.is-compact .chat-bubble.user {
+  max-width: min(42rem, 100%);
+}
+
+.chat-bubble.assistant {
+  align-self: stretch;
+  /* Flat prose — steps interleaved with tools shouldn't look like separate chat cards. */
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 2px 2px 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.chat-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  padding: 2px 0 0 1px;
+  opacity: 1;
+}
+
+.chat-msg-actions[hidden] {
+  display: none;
+}
+
+.chat-msg-user.is-compact .chat-msg-actions {
+  min-height: 0;
+  padding: 0;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.chat-msg-user .chat-msg-actions {
+  margin-top: 2px;
+  padding-left: 2px;
+  padding-right: 0;
+  justify-content: flex-end;
+}
+
+/* The sender's own copy row sits under the bubble's right edge, the same
+   spot every mainstream agent UI uses for a sent message. */
+.chat-msg-user:not(.is-compact) .chat-msg-actions {
+  align-self: flex-end;
+}
+
+.chat-msg-copy {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.chat-msg-user:hover .chat-msg-copy,
+.chat-msg-assistant:hover .chat-msg-copy,
+.chat-msg-user:focus-within .chat-msg-copy,
+.chat-msg-assistant:focus-within .chat-msg-copy,
+.chat-msg-copy.is-copied {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.chat-msg-user:hover .chat-msg-copy:hover,
+.chat-msg-assistant:hover .chat-msg-copy:hover,
+.chat-msg-user:focus-within .chat-msg-copy:focus-visible,
+.chat-msg-assistant:focus-within .chat-msg-copy:focus-visible {
+  background: rgba(10, 10, 10, 0.05);
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.chat-msg-copy:active {
+  background: rgba(10, 10, 10, 0.09);
+}
+
+.chat-msg-copy.is-copied {
+  color: #16a34a;
+  opacity: 0.95;
+}
+
+.chat-msg-copy[hidden] {
+  display: none;
+}
+
+.chat-msg-time {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  line-height: 24px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+/* The time rides along with the copy button: same hover, plus the copied flash. */
+.chat-msg-user:hover .chat-msg-time,
+.chat-msg-assistant:hover .chat-msg-time,
+.chat-msg-user:focus-within .chat-msg-time,
+.chat-msg-assistant:focus-within .chat-msg-time,
+.chat-msg-copy.is-copied ~ .chat-msg-time {
+  opacity: 1;
+}
+
+.chat-msg-time[hidden] {
+  display: none;
+}
+
+.chat-msg-copy svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.chat-code-block {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0.75em 0;
+  max-height: 50vh;
+  border: 1px solid rgba(10, 10, 10, 0.08);
+  border-radius: 14px;
+  background: #ececec;
+  overflow: hidden;
+}
+
+.chat-code-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 8px 6px 14px;
+  color: #737373;
+}
+
+.chat-code-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 550;
+}
+
+.chat-code-lang::before {
+  content: "</>";
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chat-code-block pre {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 16px 14px;
+  background: transparent;
+  color: inherit;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
+}
+
+.chat-code-block.is-source pre {
+  overflow-x: auto;
+}
+
+.chat-code-copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(10, 10, 10, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.chat-code-copy:hover {
+  background: #fafafa;
+  border-color: rgba(10, 10, 10, 0.18);
+}
+
+.chat-code-copy.is-copied {
+  color: #15803d;
+  border-color: rgba(21, 128, 61, 0.28);
+  background: #f0fdf4;
+}
+
+.chat-code-copy svg {
+  display: block;
+  flex: 0 0 auto;
+}
+

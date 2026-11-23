@@ -1,0 +1,664 @@
+/* Every process row shares one rail: 3px 6px padding, a 14px icon slot,
+   8px gap — thinking, tool, status and fold rows all start text at the same
+   x, with or without a visible glyph. */
+.chat-activity {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(640px, 92%);
+  margin: 1px 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  min-height: 24px;
+  box-sizing: border-box;
+}
+
+.chat-activity.is-live {
+  background: transparent;
+  color: var(--text);
+}
+
+.chat-activity.is-done {
+  opacity: 0.62;
+}
+
+/* The status icon takes the same 14px slot as the tool glyph; while the row
+   runs, the spinner replaces it. */
+.chat-activity-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+.chat-activity-icon::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  opacity: 0.8;
+  -webkit-mask: var(--activity-icon, none) center / 12px 12px no-repeat;
+  mask: var(--activity-icon, none) center / 12px 12px no-repeat;
+}
+
+/* Kinds without a glyph fall back to a visible dot, never a blank slot. */
+.chat-activity:not(.kind-log):not(.kind-info):not(.kind-error):not(.kind-think):not(.kind-write)
+  > .chat-activity-icon::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  -webkit-mask: none;
+  mask: none;
+}
+
+.chat-activity.is-live > .chat-activity-icon {
+  display: none;
+}
+
+.chat-activity.is-live > .chat-spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-activity.kind-log > .chat-activity-icon {
+  --activity-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E");
+}
+
+.chat-activity.kind-info > .chat-activity-icon {
+  --activity-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 16v-4'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E");
+}
+
+.chat-activity.kind-error > .chat-activity-icon {
+  --activity-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
+}
+
+.chat-activity.kind-think > .chat-activity-icon,
+.chat-activity.kind-write > .chat-activity-icon {
+  --activity-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/%3E%3Cpath d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/%3E%3C/svg%3E");
+}
+
+.chat-tool-group {
+  align-self: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  margin: 1px 0;
+  color: var(--faint);
+  overflow-x: hidden;
+}
+
+.chat-tool-group-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  /* Top-aligned, or the glyph-free icon's baseline drops the whole row 12px. */
+  vertical-align: top;
+  min-height: 0;
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.chat-tool-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-tool-group-summary:hover {
+  background: var(--fill);
+  color: var(--muted);
+}
+
+.chat-tool-group.is-live .chat-tool-group-summary {
+  background: transparent;
+  color: var(--muted);
+}
+
+/* The markup carries a "$" glyph; hide it and draw a wrench instead. */
+.chat-tool-group-icon {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  font-size: 0;
+  color: inherit;
+  background: currentColor;
+  opacity: 0.45;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.chat-tool-group-chevron {
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-tool-group > .chat-tool-group-summary:is(:hover, :focus-within) .chat-tool-group-chevron,
+.chat-tool-group[open]:is(:hover, :focus-within) .chat-tool-group-chevron {
+  opacity: 0.85;
+}
+
+.chat-tool-group[open] .chat-tool-group-chevron {
+  margin-bottom: -1px;
+  transform: rotate(225deg);
+}
+
+.chat-thinking {
+  align-self: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  margin: 1px 0;
+  color: var(--muted);
+}
+
+/* Same box as a tool row (24px, 3px 6px padding, 14px glyph slot, 8px gap), so
+   the thought rows and the tool rows share one icon column and one label column. */
+.chat-thinking-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, 95%);
+  min-width: 0;
+  vertical-align: top;
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-thinking-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-thinking-summary:hover {
+  background: rgba(10, 10, 10, 0.05);
+}
+
+.chat-thinking-label {
+  flex: 0 0 auto;
+}
+
+.chat-thinking-snippet {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.chat-thinking-snippet[hidden] {
+  display: none;
+}
+
+/* Process rows stack as one list: the log's message gap does not apply
+   between two consecutive process rows, whatever their kind. */
+.chat-log > :is(.chat-thinking, .chat-tool-group, .chat-stage-group, .chat-activity, .chat-work) + :is(.chat-thinking, .chat-tool-group, .chat-stage-group, .chat-activity, .chat-work) {
+  margin-top: -9px;
+}
+
+/* An 11px brain centred in the same 14px slot the tool glyph uses. */
+.chat-thinking-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  opacity: 0.45;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/%3E%3Cpath d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/%3E%3C/svg%3E")
+    center / 11px 11px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/%3E%3Cpath d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/%3E%3C/svg%3E")
+    center / 11px 11px no-repeat;
+}
+
+.chat-thinking-summary .chat-activity-elapsed {
+  margin-left: 0;
+  font-weight: 500;
+}
+
+/* Once sealed the elapsed slot is blank; drop it so the arrow hugs the label. */
+.chat-thinking-summary .chat-activity-elapsed:empty {
+  display: none;
+}
+
+.chat-thinking.is-live .chat-thinking-label {
+  background: linear-gradient(90deg, var(--muted) 30%, rgba(148, 163, 184, 0.45) 50%, var(--muted) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chat-thinking-shimmer 1.6s linear infinite;
+}
+
+@keyframes chat-thinking-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Disclosure arrow stays visible on folded process bars, brightening on hover. */
+.chat-thinking-chevron {
+  display: block;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.52;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-thinking > .chat-thinking-summary:is(:hover, :focus-within) .chat-thinking-chevron,
+.chat-thinking[open]:is(:hover, :focus-within) .chat-thinking-chevron {
+  opacity: 0.85;
+}
+
+.chat-thinking[open] .chat-thinking-chevron {
+  margin-bottom: -1px;
+  transform: rotate(225deg);
+}
+
+/* While thinking, a peek of three lines with the rest scrolling inside.
+   When it is done, the block folds into its header row; reopening shows all. */
+.chat-thinking-body {
+  --chat-thinking-line: 1.55;
+  margin: 4px 0 2px 22px;
+  padding: 0 0 0 6px;
+  border-left: 1px solid rgba(10, 10, 10, 0.1);
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: var(--chat-thinking-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-thinking.is-live .chat-thinking-body {
+  max-height: calc(var(--chat-thinking-line) * 3em);
+  overflow-y: auto;
+}
+
+/* A transparent wrapper keeps restored process rows in chronological order
+   without adding another collapsible "working" level. */
+.chat-work-stream {
+  display: contents;
+}
+
+/* A long running turn folds its process stream into one live pill (the
+   single fold per turn): the pill shows the running step count and clicks
+   open the full stream for a peek. */
+.chat-work-stream.is-folded > :not(.chat-work-live-pill) {
+  display: none;
+}
+
+/* [hidden] must win over display, or the empty pill shows as a grey bar. */
+.chat-work-live-pill[hidden] {
+  display: none;
+}
+
+.chat-work-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--faint);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: background 0.15s ease;
+  /* Running state: shimmer + pulse so it's obvious this is NOT done yet. */
+  background: linear-gradient(90deg, var(--fill) 0%, rgba(148, 163, 184, 0.25) 50%, var(--fill) 100%);
+  background-size: 200% 100%;
+  animation: chat-work-live-pulse 1.6s linear infinite;
+}
+
+.chat-work-live-pill:hover {
+  background: var(--fill);
+}
+
+@keyframes chat-work-live-pulse {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.chat-work {
+  align-self: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  margin: 1px 0;
+  color: var(--faint);
+}
+
+.chat-work-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-wrap: wrap;
+}
+
+.chat-work-files {
+  display: flex;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+  gap: 6px;
+  order: 3;
+  margin-top: 2px;
+}
+
+.chat-work-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text, inherit);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat-work-file > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-work-file:hover,
+.chat-work-file:focus-visible {
+  border-color: var(--accent, #2f6fed);
+  color: var(--accent, #2f6fed);
+}
+
+.chat-work-file-add,
+.chat-work-file-del {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+.chat-work-file-add {
+  color: #1a7f37;
+}
+
+.chat-work-file-del {
+  color: #cf222e;
+}
+
+.chat-reply-changes {
+  align-self: stretch;
+  box-sizing: border-box;
+  /* Same column as the composer: the log and the input share one content width. */
+  width: 100%;
+  max-width: 100%;
+  /* The log is a column. overflow:hidden would otherwise let this card shrink and clip the file row. */
+  flex-shrink: 0;
+  margin: 8px 0 2px;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: 12px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.chat-reply-changes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px 1px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+
+.chat-reply-changes-review {
+  margin: 0 -4px 0 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-reply-changes-review:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.chat-reply-changes-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 0;
+  padding: 4px 12px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.chat-reply-changes-file:hover {
+  background: color-mix(in srgb, var(--fill) 80%, transparent);
+}
+
+.chat-reply-changes-file[hidden] {
+  display: none;
+}
+
+.chat-reply-changes-mark {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-weight: 500;
+}
+
+.chat-reply-changes-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-reply-changes-stats {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-reply-changes-add {
+  color: var(--ok);
+}
+
+.chat-reply-changes-del {
+  color: var(--danger);
+}
+
+.chat-reply-changes-more {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 4px 12px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-reply-changes-more:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--fill) 80%, transparent);
+}
+
+.chat-work-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+.chat-work-icon::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  opacity: 0.8;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 6h13'/%3E%3Cpath d='M8 12h13'/%3E%3Cpath d='M8 18h13'/%3E%3Cpath d='M3 6h.01'/%3E%3Cpath d='M3 12h.01'/%3E%3Cpath d='M3 18h.01'/%3E%3C/svg%3E")
+    center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 6h13'/%3E%3Cpath d='M8 12h13'/%3E%3Cpath d='M8 18h13'/%3E%3Cpath d='M3 6h.01'/%3E%3Cpath d='M3 12h.01'/%3E%3Cpath d='M3 18h.01'/%3E%3C/svg%3E")
+    center / 12px 12px no-repeat;
+}
+
+.chat-work-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-work-summary:hover {
+  background: var(--fill);
+  color: var(--muted);
+}
+
+.chat-work.is-live .chat-work-label {
+  background: linear-gradient(90deg, var(--muted) 30%, rgba(148, 163, 184, 0.45) 50%, var(--muted) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chat-thinking-shimmer 1.6s linear infinite;
+}
+
+.chat-work-chevron {
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.52;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-work > .chat-work-summary:is(:hover, :focus-within) .chat-work-chevron,
+.chat-work[open]:is(:hover, :focus-within) .chat-work-chevron {
+  opacity: 0.85;
+}
+
+.chat-work[open] .chat-work-chevron {
+  margin-bottom: -1px;
+  transform: rotate(225deg);
+}
+
+.chat-work-body {
+  display: grid;
+  gap: 2px;
+  /* The border sits under the label's icon column; child rows then start
+     their own icon at the label's text x, so the rail cascades. */
+  margin: 2px 0 2px 22px;
+  padding: 0 0 2px 0;
+  border-left: 1px solid rgba(10, 10, 10, 0.1);
+}
+
+.chat-work-body .chat-thinking,
+.chat-work-body .chat-tool-group,
+.chat-work-body .chat-stage-group,
+.chat-work-body .chat-tool-row,
+.chat-stage-body .chat-tool-row {
+  max-width: 100%;
+  margin: 0;
+}
+
+.chat-work-prose {
+  margin: 2px 0;
+  padding: 2px 6px 2px 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.chat-work-prose > :first-child {
+  margin-top: 0;
+}
+
+.chat-work-prose > :last-child {
+  margin-bottom: 0;
+}
+

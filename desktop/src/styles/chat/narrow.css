@@ -1,0 +1,57 @@
+/* The Ask window cannot go below 720px. A 760px stack breakpoint was firing
+   on Windows laptops (125–150% scale, snapped or beside another app) and
+   turned the project list into a short strip on top of the chat. */
+@media (max-width: 560px) {
+  .chat-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .chat-shell.is-resources-open {
+    grid-template-columns: 1fr;
+  }
+  .chat-resources-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .chat-shell.is-resources-open .chat-resources-panel {
+    max-height: 36vh;
+  }
+  .chat-resources-panel-inner {
+    width: 100%;
+  }
+  .chat-side {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    max-height: 42vh;
+    overflow: auto;
+  }
+
+  .chat-shell.is-side-collapsed {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .chat-shell.is-resources-open.is-side-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .chat-main {
+    min-height: 0;
+  }
+
+  .chat-shell.is-settings .chat-settings {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .chat-settings-nav {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    max-height: 42vh;
+  }
+
+  .chat-settings-main {
+    padding: 18px 16px 32px;
+  }
+}
+

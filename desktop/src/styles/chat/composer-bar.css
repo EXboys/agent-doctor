@@ -1,0 +1,335 @@
+/* Composer toolbar stays on one line. A wide bar shows auto-approve and chat size; a narrow one folds them. */
+.chat-composer-bar {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  align-items: center;
+  gap: 6px 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 14px 10px 10px;
+}
+
+.chat-composer-tools {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: min-content;
+}
+
+/* Roomy bars show the whole model name; the wrap still shrinks (ellipsis)
+   before it can crowd the send button. */
+.chat-composer-send .chat-model-wrap {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: min(320px, 60vw);
+  overflow: hidden;
+}
+
+.chat-composer-send .chat-model-btn {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  height: 30px;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+}
+
+.chat-composer-send .chat-model-btn span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer-send .chat-model-menu {
+  left: auto;
+  right: 0;
+}
+
+.chat-pick-skill svg {
+  display: block;
+}
+
+.chat-composer-box:has(.chat-tune-btn.is-open),
+.chat-composer:has(.chat-tune-btn.is-open) {
+  overflow: visible;
+}
+
+.chat-tune-wrap.is-inline .chat-tune-btn {
+  display: none;
+}
+
+.chat-tune-wrap.is-inline .chat-tune-menu {
+  position: static;
+  display: flex;
+  align-items: center;
+  width: auto;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  gap: 2px;
+}
+
+.chat-tune-wrap.is-inline .chat-tune-hint,
+.chat-tune-wrap.is-inline .chat-tune-context {
+  display: none;
+}
+
+.chat-tune-wrap:not(.is-inline) + .chat-context-wrap {
+  display: none;
+}
+
+.chat-tune-wrap.is-inline .chat-tune-item,
+.chat-tune-wrap.is-inline .chat-tune-item + .chat-tune-item {
+  margin: 0;
+  background: transparent;
+}
+
+.chat-tune-wrap.is-inline .chat-tune-item:hover {
+  background: transparent;
+}
+
+.chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-menu .chat-elevated,
+.chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-menu .chat-elevated:hover,
+.chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-menu .chat-elevated:has(input:checked),
+html[data-theme="dark"] .chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-menu .chat-elevated,
+html[data-theme="dark"] .chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-menu .chat-elevated:hover,
+html[data-theme="dark"] .chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-menu .chat-elevated:has(input:checked) {
+  display: inline-flex;
+  justify-content: flex-start;
+  width: auto;
+  max-width: none;
+  height: 30px;
+  padding: 0 8px;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.78rem;
+  font-weight: 560;
+}
+
+.chat-composer-send {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  gap: 6px;
+}
+
+.chat-composer-send .chat-voice-mode,
+.chat-composer-send .btn-send {
+  flex: 0 0 auto;
+}
+
+.chat-composer-bar .btn-composer-icon:not(.is-listening),
+.chat-composer-bar .chat-model-btn,
+.chat-composer-bar .chat-context-ring-btn,
+.chat-composer-bar .chat-elevated {
+  height: 30px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.chat-composer-bar .btn-composer-icon {
+  width: 30px;
+}
+
+.chat-composer-bar .chat-model-btn {
+  color: var(--text);
+}
+
+.chat-composer-bar .btn-composer-icon:not(.is-listening):hover,
+.chat-composer-bar .chat-model-btn:hover:not(:disabled),
+.chat-composer-bar .chat-context-ring-btn:hover,
+.chat-composer-bar .chat-context-ring-btn.is-open,
+.chat-composer-bar .chat-elevated:hover {
+  border-color: transparent;
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-tune-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.chat-tune-btn {
+  position: relative;
+}
+
+.chat-composer-bar .chat-tune-btn.is-open {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-tune-dot {
+  display: none;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+.chat-tune-wrap:has(#chat-elevated:checked) .chat-tune-dot {
+  display: block;
+}
+
+.chat-tune-menu {
+  position: fixed;
+  z-index: 1000;
+  width: 264px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(10, 10, 10, 0.16);
+}
+
+.chat-tune-menu[hidden] {
+  display: none;
+}
+
+.chat-tune-item {
+  border-radius: 8px;
+}
+
+.chat-tune-item + .chat-tune-item {
+  margin-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.chat-tune-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 8px 2px;
+}
+
+.chat-tune-context .chat-context-wrap {
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-tune-context .chat-context-ring-btn {
+  min-width: 0;
+  height: 28px;
+  padding: 0 2px;
+  pointer-events: none;
+}
+
+.chat-tune-context-name {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chat-tune-menu .chat-context-compact {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.chat-tune-context .chat-tune-hint {
+  flex: 1 0 100%;
+  padding: 0 2px 8px;
+}
+
+.chat-tune-item:hover {
+  background: var(--fill);
+}
+
+.chat-composer-bar .chat-tune-menu .chat-elevated,
+.chat-composer-bar .chat-tune-menu .chat-elevated:hover,
+.chat-composer-bar .chat-tune-menu .chat-elevated:has(input:checked),
+html[data-theme="dark"] .chat-composer-bar .chat-tune-menu .chat-elevated,
+html[data-theme="dark"] .chat-composer-bar .chat-tune-menu .chat-elevated:hover,
+html[data-theme="dark"] .chat-composer-bar .chat-tune-menu .chat-elevated:has(input:checked) {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  padding: 9px 10px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chat-tune-hint {
+  margin: 0;
+  padding: 0 10px 9px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.chat-composer-bar .btn-send {
+  height: 30px;
+  min-width: 60px;
+  border-radius: 8px;
+}
+
+html[data-theme="dark"] .chat-composer-bar .btn-composer-icon:not(.is-listening),
+html[data-theme="dark"] .chat-composer-bar .chat-context-ring-btn,
+html[data-theme="dark"] .chat-composer-bar .chat-elevated {
+  border-color: transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+html[data-theme="dark"] .chat-composer-bar .chat-model-btn {
+  border-color: transparent;
+  background: transparent;
+  color: #d4d4d4;
+}
+
+html[data-theme="dark"] .chat-composer-bar .btn-composer-icon:not(.is-listening):hover,
+html[data-theme="dark"] .chat-composer-bar .chat-model-btn:hover:not(:disabled),
+html[data-theme="dark"] .chat-composer-bar .chat-context-ring-btn:hover,
+html[data-theme="dark"] .chat-composer-bar .chat-context-ring-btn.is-open,
+html[data-theme="dark"] .chat-composer-bar .chat-elevated:hover {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8e8e8;
+}
+
+html[data-theme="dark"] .chat-tune-menu {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #262626;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+html[data-theme="dark"] .chat-tune-dot {
+  box-shadow: 0 0 0 2px #262626;
+}
+
+html[data-theme="dark"] .chat-composer-bar .chat-voice-mode.is-on {
+  background: rgba(91, 143, 255, 0.16);
+  color: #9db8ff;
+}
+
+.chat-composer-bar .chat-voice-mode.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+

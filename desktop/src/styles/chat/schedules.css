@@ -1,0 +1,875 @@
+/* ---- 计划任务管理（与手机同一批站点数据） ---- */
+
+.chat-schedules-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+/* Explicit display rules below must never override HTML [hidden]. */
+.chat-schedules-manage [hidden] {
+  display: none !important;
+}
+
+.chat-schedules-manage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chat-schedules-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.chat-schedules-mine-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-schedules-mine {
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.chat-schedules-count {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.chat-schedules-note {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.chat-schedules-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chat-schedules-toolbtn,
+.chat-schedules-addbtn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.chat-schedules-toolbtn:hover:not(:disabled) {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-schedules-toolbtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.chat-schedules-toolbtn.is-loading svg {
+  animation: chat-schedules-spin 0.8s linear infinite;
+}
+
+@keyframes chat-schedules-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chat-schedules-addbtn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chat-schedules-addbtn:hover {
+  filter: brightness(1.06);
+}
+
+.chat-schedules-guard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.chat-schedules-guard-text {
+  flex: 1 1 220px;
+  font-size: 0.8rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.chat-schedules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-schedules-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.chat-schedules-row:hover {
+  border-color: var(--line-strong);
+}
+
+.chat-schedules-row.is-off .chat-schedules-copy {
+  opacity: 0.52;
+}
+
+.chat-schedules-row.is-editing {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chat-schedules-copy {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-schedules-topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-schedules-title-btn {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-schedules-title-btn:hover {
+  color: var(--accent);
+}
+
+.chat-schedules-copy strong {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-schedules-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--fill);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.chat-schedules-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.chat-schedules-status.is-sent::before {
+  background: var(--accent);
+}
+
+.chat-schedules-status.is-sent {
+  color: var(--accent);
+}
+
+.chat-schedules-status.is-queued::before {
+  background: var(--warn);
+}
+
+.chat-schedules-status.is-queued {
+  color: var(--warn);
+}
+
+.chat-schedules-status.is-done::before {
+  background: var(--ok);
+}
+
+.chat-schedules-status.is-done {
+  color: var(--ok);
+}
+
+.chat-schedules-status.is-failed::before,
+.chat-schedules-status.is-missed::before {
+  background: var(--danger);
+}
+
+.chat-schedules-status.is-failed,
+.chat-schedules-status.is-missed {
+  color: var(--danger);
+}
+
+.chat-schedules-summary {
+  font-size: 0.76rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-schedules-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.chat-schedules-mini {
+  appearance: none;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.chat-schedules-mini:hover {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-schedules-mini.is-danger {
+  color: var(--danger);
+}
+
+.chat-schedules-mini.is-danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.chat-schedules-mini:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: transparent;
+  color: var(--muted);
+}
+
+.chat-schedules-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  text-align: center;
+}
+
+.chat-schedules-empty-text {
+  margin: 0;
+  max-width: 34rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.chat-schedules-empty-cta {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.chat-schedules-empty-cta:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chat-schedules-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.chat-schedules-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-schedules-form-title {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.chat-schedules-polish-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-schedules-polish,
+.chat-schedules-polish-undo {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.chat-schedules-polish {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chat-schedules-polish:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.chat-schedules-polish:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.chat-schedules-polish.is-loading svg {
+  animation: chat-schedules-pulse 1s ease-in-out infinite;
+}
+
+@keyframes chat-schedules-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.88);
+  }
+}
+
+.chat-schedules-polish-undo {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.chat-schedules-polish-undo:hover:not(:disabled) {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-schedules-prompt {
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  resize: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.chat-schedules-prompt.is-polishing {
+  opacity: 0.68;
+  border-color: var(--accent);
+}
+
+.chat-schedules-prompt::placeholder {
+  color: var(--faint);
+}
+
+.chat-schedules-fields {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.chat-schedules-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-schedules-when-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-schedules-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chat-schedules-freq,
+.chat-schedules-time-btn,
+.chat-schedules-client {
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background-color: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-schedules-freq,
+.chat-schedules-time-btn,
+.chat-schedules-client {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0 28px 0 11px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 1px),
+    calc(100% - 9px) calc(50% - 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.chat-schedules-freq:hover,
+.chat-schedules-time-btn:hover,
+.chat-schedules-client:hover {
+  border-color: var(--muted);
+}
+
+.chat-schedules-freq {
+  min-width: 104px;
+}
+
+.chat-schedules-timepicker {
+  position: relative;
+}
+
+.chat-schedules-time-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 112px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chat-schedules-time-btn.is-open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.chat-schedules-clock-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.chat-timepicker-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  width: 244px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.chat-timepicker-popover.is-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.chat-timepicker-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-timepicker-preset {
+  appearance: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.chat-timepicker-preset:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.chat-timepicker-preset.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chat-timepicker-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.chat-timepicker-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-timepicker-col-head {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chat-timepicker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 156px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-timepicker-cell {
+  appearance: none;
+  flex-shrink: 0;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.chat-timepicker-cell.is-step {
+  color: var(--text);
+}
+
+.chat-timepicker-cell:hover {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-timepicker-cell.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chat-timepicker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-timepicker-custom {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-timepicker-custom:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chat-timepicker-done {
+  appearance: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+html[data-theme="dark"] .chat-timepicker-done {
+  color: #0c0c0c;
+}
+
+.chat-schedules-bind-wrap {
+  flex: 1 1 220px;
+  max-width: 340px;
+}
+
+.chat-schedules-client {
+  width: 100%;
+  min-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-theme="dark"] .chat-schedules-freq option,
+html[data-theme="dark"] .chat-schedules-client option {
+  background: #1f1f1f;
+  color: #d4d4d4;
+}
+
+.chat-schedules-form :is(.chat-schedules-freq, .chat-schedules-time-btn, .chat-schedules-client, .chat-schedules-prompt):focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.chat-schedules-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-schedules-day {
+  appearance: none;
+  min-width: 40px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.chat-schedules-day:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.chat-schedules-day.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chat-schedules-form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-schedules-cancel {
+  appearance: none;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.chat-schedules-cancel:hover {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-schedules-primary {
+  appearance: none;
+  height: 32px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.12s ease, opacity 0.12s ease;
+}
+
+html[data-theme="dark"] .chat-schedules-primary {
+  color: #0c0c0c;
+}
+
+.chat-schedules-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.chat-schedules-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-schedules-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-schedules-scenes-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

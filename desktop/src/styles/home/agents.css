@@ -1,0 +1,469 @@
+.widget-section {
+  padding: 10px 12px;
+  margin-bottom: 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.health-card,
+.agents-security-overview {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.health-card.is-ok,
+.agents-security-overview.is-ok {
+  border-color: rgba(22, 163, 74, 0.22);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--success) 12%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card.is-warn {
+  border-color: rgba(217, 119, 6, 0.22);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--warn) 12%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card.is-fail {
+  border-color: rgba(220, 38, 38, 0.2);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--danger) 10%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card.is-busy {
+  border-color: rgba(59, 130, 246, 0.22);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--primary) 12%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card-ring,
+.agents-readiness-ring {
+  --readiness: 0;
+  --ring-color: var(--success);
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring-color) calc(var(--readiness) * 1%),
+    var(--surface-inset) 0
+  );
+  text-align: center;
+}
+
+.health-card-ring::before,
+.agents-readiness-ring::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.health-card-ring strong,
+.health-card-ring span,
+.agents-readiness-ring strong,
+.agents-readiness-ring span {
+  position: relative;
+  z-index: 1;
+}
+
+.health-card-ring strong,
+.agents-readiness-ring strong {
+  font-size: 0.88rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-card-ring span,
+.agents-readiness-ring span {
+  max-width: 44px;
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.48rem;
+  line-height: 1.1;
+}
+
+.health-card-ring.is-warn,
+.agents-readiness-ring.is-warn {
+  --ring-color: var(--warn);
+}
+
+.health-card-ring.is-fail,
+.agents-readiness-ring.is-fail {
+  --ring-color: var(--danger);
+}
+
+.agents-readiness-ring.is-empty {
+  --ring-color: #94a3b8;
+}
+
+.health-card-ring.is-busy {
+  --ring-color: var(--primary);
+}
+
+.health-card-ring.is-scanning {
+  animation: health-card-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes health-card-pulse {
+  0%,
+  100% {
+    filter: saturate(0.85);
+  }
+  50% {
+    filter: saturate(1.15);
+  }
+}
+
+.health-card-copy,
+.agents-security-copy {
+  min-width: 0;
+}
+
+.health-card-kicker {
+  margin: 0 0 2px;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--success);
+}
+
+.health-card.is-warn .health-card-kicker {
+  color: var(--warn);
+}
+
+.health-card.is-fail .health-card-kicker {
+  color: var(--danger);
+}
+
+.health-card.is-busy .health-card-kicker {
+  color: var(--primary-deep);
+}
+
+.health-card-copy h2,
+.agents-security-copy h2 {
+  margin: 0 0 3px;
+  font-size: 0.82rem;
+}
+
+.health-card-copy > p,
+.agents-security-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.health-card-stats,
+.agents-security-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.health-card-stat,
+.agents-security-stats span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-soft);
+  font-size: 0.56rem;
+  line-height: 1.2;
+  border: 1px solid transparent;
+}
+
+.health-card-stat strong {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+
+.health-card-stat.is-pass,
+.agents-security-stats span:not(.has-issues) {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.agents-security-stats span.has-issues {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* The summary sits above the agent tiles. A little more height keeps it primary. */
+.agents-security-overview {
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px 14px;
+  margin-bottom: 10px;
+}
+
+.agents-security-overview .agents-readiness-ring {
+  width: 72px;
+  height: 72px;
+}
+
+.agents-security-overview .agents-readiness-ring strong {
+  font-size: 1rem;
+}
+
+.agents-security-overview .agents-security-copy h2 {
+  margin-bottom: 4px;
+  font-size: 0.96rem;
+}
+
+.agents-security-overview .agents-security-copy p {
+  font-size: 0.7rem;
+}
+
+.agents-security-overview .agents-security-stats {
+  margin-top: 10px;
+}
+
+.agents-security-overview .agents-security-stats span {
+  padding: 4px 9px;
+  font-size: 0.62rem;
+}
+
+.health-card-stat.is-warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.health-card-stat.is-fail {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.agents-security-overview {
+  /* kept for existing selectors; layout comes from shared block above */
+}
+
+.first-run {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.first-run-eyebrow {
+  margin: 0 0 2px;
+  color: var(--accent);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.first-run-title {
+  margin: 0 0 4px;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.first-run-desc {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.first-run.is-error {
+  border-color: color-mix(in srgb, var(--danger, #c44) 35%, var(--border));
+}
+
+.first-run.is-error .first-run-desc {
+  color: color-mix(in srgb, var(--danger, #c44) 75%, var(--text));
+}
+
+.first-run-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 0 0 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.first-run-target strong {
+  font-size: 0.74rem;
+}
+
+.first-run-target span {
+  color: var(--text-soft);
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.first-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.first-run-actions > button {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1;
+  box-shadow: none;
+  transform: none;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+/* The `display` rules above beat the UA `[hidden]` rule. */
+.first-run-target[hidden],
+.first-run-actions > button[hidden] {
+  display: none;
+}
+
+.first-run-actions .btn-primary {
+  min-width: 7rem;
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: #fff;
+}
+
+.first-run-actions .btn-primary:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  background: var(--primary-deep);
+}
+
+.first-run-actions .btn-primary .spinner {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+.first-run-actions .btn-ghost {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.first-run-actions .btn-ghost:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.first-run-footnote {
+  margin: 6px 0 0;
+  color: var(--text-soft);
+  font-size: 0.56rem;
+  line-height: 1.35;
+}
+
+/* Tip sits above the Agents list — never replace the homepage. */
+#panel-diagnose.is-first-run-done .first-run {
+  display: none;
+}
+
+.runtime-section {
+  padding: 10px 12px;
+}
+
+.runtime-section .runtime-tabs {
+  margin-bottom: 8px;
+}
+
+.runtime-tabs[hidden] {
+  display: none !important;
+}
+
+.runtime-section.is-solo {
+  padding-top: 4px;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.section-label h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.section-icon {
+  color: var(--primary);
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+.section-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-soft);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.section-hint,
+.section-footnote,
+.section-meta {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.section-footnote {
+  margin: 8px 0 0;
+  min-height: 1.1em;
+}
+
+/* Same tone language as diagnose-result — soft pill under wiring actions. */

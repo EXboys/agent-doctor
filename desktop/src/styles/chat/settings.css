@@ -1,0 +1,381 @@
+.chat-settings {
+  display: none;
+  grid-row: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--main-bg);
+}
+
+.chat-main.is-settings > :not(.chat-settings) {
+  display: none !important;
+}
+
+/* The settings menu is positioned against the whole window, over the project list.
+   The chat column is positioned for the question ticks; that must not move this menu. */
+.chat-main.is-settings {
+  position: static;
+}
+
+.chat-main.is-settings .chat-settings {
+  display: block;
+  height: 100%;
+}
+
+.chat-shell.is-settings {
+  position: relative;
+}
+
+.chat-shell.is-settings > .chat-side > :not(.chat-side-foot),
+.chat-shell.is-settings .chat-side-foot > :not(.chat-account-bar) {
+  display: none !important;
+}
+
+.chat-shell.is-settings > .chat-side {
+  z-index: 3;
+  background: var(--side-bg);
+  pointer-events: none;
+}
+
+.chat-shell.is-settings .chat-account-bar {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.chat-shell.is-settings .chat-settings-nav {
+  position: absolute;
+  z-index: 4;
+  left: 0;
+  top: 0;
+  bottom: 72px;
+  width: var(--chat-side-w);
+  padding: 10px 16px 12px;
+  border-right: 0;
+  pointer-events: auto;
+}
+
+.chat-knowledge,
+.chat-schedule,
+.chat-resources-page {
+  display: none;
+  grid-row: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--main-bg);
+}
+
+.chat-main.is-knowledge > :not(#chat-knowledge),
+.chat-main.is-schedule > :not(#chat-schedule),
+.chat-main.is-resources-page > :not(#chat-resources-page) {
+  display: none !important;
+}
+
+.chat-main.is-knowledge #chat-knowledge,
+.chat-main.is-schedule #chat-schedule,
+.chat-main.is-resources-page #chat-resources-page {
+  display: block;
+  grid-column: 1 / -1;
+  height: 100%;
+}
+
+.chat-main.is-resources-page #chat-resources-page {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-main.is-knowledge #chat-resources-page,
+.chat-main.is-resources-page #chat-knowledge {
+  display: none !important;
+}
+
+.chat-resources-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-skill-add {
+  position: relative;
+  z-index: 5;
+}
+
+.chat-skill-add-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.chat-skill-add-menu button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-skill-add-menu button:hover {
+  background: var(--fill);
+}
+
+.chat-resources-page .chat-knowledge-inner {
+  flex: 1;
+  min-height: 0;
+  margin: 0 auto;
+  padding-bottom: 10px;
+  overflow: hidden;
+}
+
+.chat-resources-page-search {
+  margin: 0;
+}
+
+.chat-resources-kind-tabs {
+  display: flex;
+  gap: 24px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-resources-kind-tab {
+  position: relative;
+  min-width: 56px;
+  padding: 0 2px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chat-resources-kind-tab::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+}
+
+.chat-resources-kind-tab:hover {
+  color: var(--text);
+}
+
+.chat-resources-kind-tab.is-on {
+  color: var(--text);
+}
+
+.chat-resources-kind-tab.is-on::after {
+  background: var(--accent);
+}
+
+.chat-resources-kind-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.chat-subagent-form[hidden],
+#chat-subagent-list-view[hidden],
+.chat-subagent-textbtn[hidden] {
+  display: none !important;
+}
+
+.chat-res-icon[data-tone="subagent"] {
+  background: #4f46e5;
+}
+
+.chat-subagent-form-hint {
+  margin: 0;
+  max-width: 28rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.chat-subagent-form {
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.chat-subagent-form.is-open {
+  display: flex;
+}
+
+.chat-subagent-form-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.chat-subagent-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.chat-subagent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.chat-subagent-field input,
+.chat-subagent-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.chat-subagent-field textarea {
+  min-height: 140px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.chat-subagent-field input:focus,
+.chat-subagent-field textarea:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+
+.chat-subagent-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chat-subagent-textbtn {
+  margin-right: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.chat-subagent-form-actions .chat-knowledge-save,
+.chat-subagent-form-actions .chat-knowledge-textbtn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+}
+
+.chat-resources-page .chat-knowledge-content {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.chat-resources-page .chat-knowledge-block {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.chat-resources-page .chat-knowledge-block-head {
+  display: none;
+}
+
+.chat-resources-page [data-resource-section][hidden] {
+  display: none;
+}
+
+.chat-resources-page-foot {
+  margin-top: auto;
+  padding: 0 4px;
+}
+
+.chat-resources-page .chat-knowledge-empty {
+  margin: 0;
+  padding: 22px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.chat-knowledge-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: var(--chat-content-w);
+  margin: 0 auto;
+  padding: 28px 32px 48px;
+  box-sizing: border-box;
+}
+
+#chat-knowledge {
+  overflow: hidden;
+}
+
+#chat-knowledge .chat-knowledge-inner {
+  height: 100%;
+  margin: 0 auto;
+  padding-bottom: 0;
+}
+
+#chat-knowledge .chat-knowledge-head,
+#chat-knowledge .chat-knowledge-picks,
+#chat-knowledge .chat-knowledge-lead,
+#chat-knowledge .chat-knowledge-scope,
+#chat-knowledge .chat-knowledge-kind-tabs {
+  flex: none;
+}
+
+#chat-knowledge .chat-knowledge-content {
+  min-height: 0;
+  margin-right: -12px;
+  padding: 0 12px 40px 0;
+  overflow-y: auto;
+}
+

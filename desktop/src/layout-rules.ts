@@ -1,7 +1,7 @@
 /**
  * Page layout numbers for the home window and the Ask columns.
  * Native window insets stay in `src-tauri/src/windows.rs` — they place the OS window.
- * `chat.css` repeats the column widths for the first paint; `tests/layout-rules.test.ts` checks that copy.
+ * `styles/chat/base.css` repeats the column widths for the first paint; `tests/layout-rules.test.ts` checks that copy.
  */
 export const layout = {
   /** Space kept above and below the home window, in logical pixels. */

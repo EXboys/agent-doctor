@@ -1,0 +1,453 @@
+.runtime-panels {
+  min-height: 80px;
+}
+
+.runtime-panels.is-loading {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.runtime-panels.is-loading::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: pulse-line 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-line {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.runtime {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.runtime.is-editing {
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: var(--radius-md);
+  background: #f8fbff;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08);
+  padding: 10px;
+}
+
+.runtime-card-label {
+  margin-bottom: 8px;
+}
+
+.runtime.has-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.runtime.has-hero .runtime-card-label .runtime-tab-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.runtime.has-hero .runtime-card-label {
+  margin: 0;
+}
+
+/* The big block is painted on every card so it can be measured and shown the
+   moment there is room; only a card that carries `has-hero` draws it. */
+.runtime:not(.has-hero) .runtime-solo-hero {
+  display: none;
+}
+
+.runtime-solo-hero {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.runtime-solo-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  color: #111827;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.runtime-solo-logo .agent-brand-img,
+.runtime-solo-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.runtime-solo-kicker {
+  margin: 0 0 2px;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.runtime-solo-copy .runtime-tab-title {
+  font-size: 1.05rem;
+}
+
+.runtime-solo-blurb {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.runtime-tab-title {
+  margin: 0;
+  flex: 1;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.runtime-install-footnote,
+.footnote {
+  margin: 8px 0 0;
+  font-size: 0.68rem;
+  color: var(--text-soft);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.badge.ok {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.badge.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.badge.bad {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.badge.muted {
+  background: var(--surface-inset);
+  color: var(--text-soft);
+}
+
+.badge.preview {
+  background: rgba(124, 58, 237, 0.1);
+  color: #7c3aed;
+}
+
+.runtime-badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.meta-grid {
+  display: grid;
+  gap: 5px;
+}
+
+.resources-hub {
+  display: grid;
+  gap: 12px;
+}
+
+.resources-hub-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.resources-hub-card {
+  appearance: none;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    border-color 0.15s ease,
+    background 0.12s ease;
+}
+
+.resources-hub-card:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: color-mix(in srgb, var(--primary-deep) 4%, var(--surface));
+}
+
+.resources-hub-card:active {
+  opacity: 0.9;
+}
+
+.resources-hub-card-kicker {
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.resources-hub-card-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.resources-hub-card-meta {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--primary-deep);
+}
+
+.resources-hub-card-desc {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.resources-hub-footnote {
+  margin: 0;
+  min-height: 1.1em;
+}
+
+/* The resources card fills the tall Windows window. Keep the three entries
+   packed at the top instead of stretching each one to share the height. */
+html[data-os="windows"] .resources-hub {
+  align-content: start;
+  gap: 8px;
+}
+
+html[data-os="windows"] .resources-hub-cards {
+  gap: 16px;
+  align-content: start;
+}
+
+html[data-os="windows"] .resources-hub-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title meta"
+    "desc desc";
+  align-items: center;
+  align-content: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 10px 12px;
+  /* About 30% taller than the compact two-line row. */
+  min-height: 74px;
+}
+
+html[data-os="windows"] .resources-hub-card-kicker {
+  display: none;
+}
+
+html[data-os="windows"] .resources-hub-card-title {
+  grid-area: title;
+}
+
+html[data-os="windows"] .resources-hub-card-meta {
+  grid-area: meta;
+  justify-self: end;
+}
+
+html[data-os="windows"] .resources-hub-card-desc {
+  grid-area: desc;
+}
+
+@media (max-width: 520px) {
+  .resources-hub-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.meta-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+
+.meta-row-version.is-update {
+  align-items: start;
+}
+
+.meta-row-version.is-update .meta-value {
+  font-weight: 500;
+  white-space: normal;
+}
+
+.meta-version-block {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.meta-version-hint {
+  margin: 0;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+.meta-row-edit {
+  display: grid;
+  grid-template-columns: minmax(62px, 76px) 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.meta-label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+:root[lang="en"] .meta-label,
+:root[lang="en"] .stat-chip-label {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.meta-value {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.meta-input {
+  width: 100%;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 0.74rem;
+  background: white;
+  color: var(--text);
+}
+
+.meta-input::placeholder {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  font-family: inherit;
+}
+
+.meta-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9L12 15L18 9' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.repair-runtime-actions {
+  margin: 0 0 10px;
+}
+
+.runtime-advanced {
+  flex: 1 1 100%;
+  margin: 2px 0 0;
+}
+
+.runtime-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.runtime-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.runtime-advanced-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.runtime-advanced-meta {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.runtime-advanced-meta + .runtime-advanced-actions {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.card-hint {
+  margin: 8px 0 0;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+

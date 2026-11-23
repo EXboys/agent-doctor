@@ -1,0 +1,424 @@
+.picker {
+  position: relative;
+  min-width: 0;
+}
+
+.picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, #ffffff 0%, var(--surface-muted) 100%);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.picker-trigger:hover:not(:disabled) {
+  border-color: rgba(59, 130, 246, 0.28);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.picker-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.picker.is-open .picker-trigger {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.picker-leading {
+  color: var(--primary);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+.picker-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-chevron {
+  display: grid;
+  place-items: center;
+  color: var(--text-soft);
+  flex-shrink: 0;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.picker.is-open .picker-chevron {
+  transform: rotate(180deg);
+  color: var(--primary-deep);
+}
+
+.picker-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14);
+}
+
+.picker-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.picker-option-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.picker-option-meta {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.picker-option:hover {
+  background: var(--surface-muted);
+}
+
+.picker-option.is-active {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--primary-deep);
+}
+
+.picker-option-check {
+  opacity: 0;
+  color: var(--primary-deep);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.picker-option.is-active .picker-option-check {
+  opacity: 1;
+}
+
+.preset-row .btn-secondary {
+  min-height: 36px;
+  padding-inline: 14px;
+}
+
+.btn-secondary,
+.btn-ghost {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-secondary:hover:not(:disabled),
+.btn-ghost:hover {
+  background: var(--surface-muted);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.btn-ghost {
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  color: var(--primary-deep);
+  border-color: rgba(59, 130, 246, 0.22);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.card-actions > button {
+  height: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 0.74rem;
+  font-weight: 650;
+  box-shadow: none;
+  flex: 0 1 auto;
+  white-space: nowrap;
+}
+
+.btn-with-icon .btn-action-icon {
+  flex: 0 0 auto;
+  display: block;
+  opacity: 0.92;
+}
+
+.btn-with-icon > span {
+  line-height: 1;
+}
+
+.card-actions > .btn-primary {
+  box-shadow: none;
+}
+
+.card-actions > .btn-secondary,
+.card-actions > .btn-ghost {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.card-actions > .btn-secondary:hover:not(:disabled),
+.card-actions > .btn-ghost:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: rgba(15, 23, 42, 0.16);
+  color: var(--text);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: white;
+  padding: 7px 12px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-deep);
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.runtime-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.runtime-head .runtime-tabs {
+  margin-bottom: 0;
+}
+
+.runtime-tabs-more {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #667085);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.runtime-tabs-more:hover {
+  color: var(--primary-deep);
+}
+
+.runtime-tabs-more[hidden] {
+  display: none !important;
+}
+
+.runtime-tabs.is-loading {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.runtime-tab {
+  display: grid;
+  grid-template-columns: 7px 26px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  align-content: center;
+  column-gap: 7px;
+  row-gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  padding: 8px 10px;
+  min-height: 66px;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+html[data-os="windows"] .runtime-tab {
+  grid-template-columns: 7px 28px minmax(0, 1fr);
+  min-height: 70px;
+  font-size: 0.8rem;
+}
+
+/* The active tile is the one card that owns the current agent, so it sits on
+   a raised white surface; the others recede into the page until hovered. */
+.runtime-tab:not(.is-active) {
+  background: transparent;
+  border-color: rgba(15, 23, 42, 0.06);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.runtime-tab:not(.is-active) .runtime-tab-logo {
+  opacity: 0.7;
+  filter: saturate(0.55);
+}
+
+.runtime-tab:not(.is-active) .runtime-tab-meta {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.runtime-tab:hover:not(.is-active) {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.runtime-tab:hover:not(.is-active) .runtime-tab-logo {
+  opacity: 1;
+  filter: none;
+}
+
+.runtime-tab.is-active {
+  border-color: var(--primary);
+  background: #fff;
+  color: var(--text);
+  box-shadow:
+    0 0 0 2px rgba(59, 130, 246, 0.14),
+    0 2px 6px rgba(15, 23, 42, 0.07);
+}
+
+.runtime-tab.is-active .runtime-tab-label {
+  color: var(--primary-deep);
+  font-weight: 750;
+}
+
+.runtime-tab-label {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.runtime-tab-logo {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fff;
+  color: #111827;
+}
+
+html[data-os="windows"] .runtime-tab-logo {
+  width: 28px;
+  height: 28px;
+}
+
+.runtime-tab-logo .agent-brand-img,
+.runtime-tab-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.runtime-tab-meta {
+  grid-column: 3;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 0.64rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-os="windows"] .runtime-tab-meta {
+  font-size: 0.68rem;
+}
+
+.runtime-tab-dot {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.runtime-tab-dot.ok {
+  background: var(--success);
+}
+
+.runtime-tab-dot.warn {
+  background: var(--warn);
+}
+
+.runtime-tab-dot.off,
+.runtime-tab-dot.muted {
+  background: #94a3b8;
+}
+

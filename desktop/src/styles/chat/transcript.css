@@ -1,0 +1,206 @@
+.chat-main {
+  position: relative;
+  display: grid;
+  /* An implicit auto column grows to a long unwrapped line and pushes the header and composer off the window. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--main-bg);
+}
+
+.chat-main > .chat-log {
+  grid-row: 2;
+  position: relative;
+  z-index: 1;
+}
+
+/* Centered column matching the overlay pages' --chat-content-w. Ticks stay on the far left. */
+.chat-main > .chat-log,
+.chat-main > .chat-composer {
+  width: 100%;
+  max-width: calc(var(--chat-content-w) + 64px);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 32px;
+  padding-right: 32px;
+}
+
+.chat-question-rail {
+  position: absolute;
+  grid-column: 1;
+  grid-row: 2 / 3;
+  left: 14px;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  width: 20px;
+  pointer-events: none;
+}
+
+.chat-question-rail[hidden] {
+  display: none !important;
+}
+
+.chat-question-rail-ticks {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: min(420px, 55vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.chat-question-rail-ticks::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-question-tick {
+  position: relative;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-question-tick::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--faint) 42%, transparent);
+  transform: translateY(-50%);
+}
+
+.chat-question-tick.is-current::before,
+.chat-question-tick:hover::before,
+.chat-question-tick:focus-visible::before {
+  background: var(--text);
+}
+
+.chat-question-tick:focus-visible {
+  outline: none;
+}
+
+.chat-question-rail-card {
+  position: absolute;
+  left: 28px;
+  width: 360px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  transform: translateY(-50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.chat-question-rail-card[hidden] {
+  display: none !important;
+}
+
+.chat-main.is-files-open.is-files-split .chat-question-rail-card {
+  width: min(360px, max(200px, calc(var(--chat-split-chat-w) - 72px)));
+}
+
+.chat-question-rail-title,
+.chat-question-rail-reply {
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.chat-question-rail-title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  -webkit-line-clamp: 2;
+}
+
+.chat-question-rail-reply {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-line-clamp: 5;
+}
+
+.chat-main > .chat-files-panel {
+  position: relative;
+  grid-row: 1 / -1;
+  grid-column: 1;
+  min-height: 0;
+  min-width: 0;
+  display: none;
+  --files-tree-w: var(--files-tree-w-user, 50%);
+  --files-inner-split: var(--chat-splitter-w);
+  grid-template-columns: minmax(0, 1fr) var(--files-inner-split) var(--files-tree-w);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  background: var(--main-bg);
+}
+
+.chat-main.is-files-open:not(.is-settings):not(.is-resources-page) > .chat-files-panel {
+  display: grid;
+}
+
+.chat-main.is-files-open:not(.is-files-split):not(.is-settings):not(.is-resources-page) > :not(.chat-files-panel) {
+  display: none !important;
+}
+
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) {
+  /* Chat stays compact. The folder takes the remaining width. */
+  grid-template-columns:
+    minmax(min(var(--chat-split-chat-min), 100%), min(var(--chat-split-chat-w), 100%))
+    var(--chat-splitter-w)
+    minmax(min(280px, 40%), 1fr);
+}
+
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-top,
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-log,
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-composer {
+  grid-column: 1;
+}
+
+/* The plan dock is absolutely positioned; without a definite grid area its
+   containing block is the whole three-column chat-main, so `right: 18px`
+   anchors to the window edge on top of the files panel. Offset by the files
+   column width instead: the pill's right edge lands 18px inside the chat
+   column, exactly like the unsplit layout. */
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-plan-dock {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  right: calc(100% - min(var(--chat-split-chat-w, 410px), 100%) + 18px);
+  max-width: min(420px, calc(min(var(--chat-split-chat-w, 410px), 100%) - 40px));
+}
+
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-splitter-between-chat-files {
+  display: block;
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+
+.chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-files-panel {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  border-left: 0;
+}
+
+.chat-splitter-between-chat-files {
+  display: none;
+}
+

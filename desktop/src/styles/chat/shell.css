@@ -1,0 +1,334 @@
+.chat-shell {
+  display: grid;
+  grid-template-columns: var(--chat-side-w) var(--chat-splitter-w) minmax(0, 1fr);
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  /* Avoid animating column widths — fights layout and feels like a hitch. */
+}
+
+.chat-shell,
+.chat-shell * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(128, 128, 128, 0.14) transparent;
+}
+
+.chat-shell::-webkit-scrollbar,
+.chat-shell *::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 4px;
+}
+
+.chat-shell::-webkit-scrollbar-thumb,
+.chat-shell *::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(128, 128, 128, 0.14);
+  background-clip: padding-box;
+}
+
+.chat-shell::-webkit-scrollbar-track,
+.chat-shell *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-shell.is-resources-open {
+  grid-template-columns: 320px var(--chat-side-w) var(--chat-splitter-w) minmax(0, 1fr);
+}
+
+.chat-shell.is-side-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-shell.is-resources-open.is-side-collapsed {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+/* Collapse hides the rail everywhere except settings, whose slim rail is the
+   page's anchor bar and stays pinned. Knowledge/schedule/resources collapse
+   like chat does; their page headers carry their own expand button. */
+.chat-shell.is-side-collapsed:not(.is-settings) > .chat-side,
+.chat-shell.is-side-collapsed:not(.is-settings) > .chat-splitter-between-sessions-chat {
+  display: none;
+}
+
+.chat-layout-splitter {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 20;
+}
+
+.chat-layout-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line);
+  pointer-events: none;
+}
+
+/* No standing divider between sessions and chat: the side's tinted background
+   separates the panels. The line only shows while hovering or dragging. */
+.chat-splitter-between-sessions-chat::after {
+  background: transparent;
+}
+
+.chat-layout-splitter:hover::after,
+.chat-layout-splitter.is-dragging::after {
+  background: rgba(47, 111, 237, 0.45);
+}
+
+.chat-splitter-between-sessions-chat {
+  grid-column: 2;
+}
+
+.chat-shell.is-resources-open .chat-splitter-between-sessions-chat {
+  grid-column: 3;
+}
+
+.chat-shell.is-resources-open .chat-side {
+  grid-column: 2;
+}
+
+body.chat-is-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.chat-is-resizing * {
+  cursor: col-resize !important;
+}
+
+.chat-resources-panel {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.chat-shell.is-resources-open .chat-resources-panel {
+  display: block;
+}
+
+.chat-resources-panel-inner {
+  width: 320px;
+  height: 100%;
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.chat-resources-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-resources-panel-titles {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-resources-panel-head strong {
+  font-size: 0.92rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.chat-resources-count {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.chat-resources-toggle[hidden] {
+  display: none;
+}
+
+.chat-resources-toggle,
+.chat-knowledge-open,
+.chat-schedule-open {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 500;
+  text-align: left;
+}
+
+.chat-resources-toggle svg,
+.chat-knowledge-open svg,
+.chat-schedule-open svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.chat-resources-toggle:hover,
+.chat-resources-toggle.is-open,
+.chat-knowledge-open:hover,
+.chat-knowledge-open.is-on,
+.chat-schedule-open:hover,
+.chat-schedule-open.is-on {
+  background: rgba(10, 10, 10, 0.06);
+}
+
+.chat-resources-toggle-title {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+.chat-res-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--fill);
+}
+
+.chat-res-tab {
+  flex: 1;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chat-res-tab:hover {
+  color: var(--text);
+}
+
+.chat-res-tab.is-active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.chat-res-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.chat-res-search:focus-within {
+  border-color: rgba(47, 111, 237, 0.45);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.1);
+}
+
+.chat-res-search-icon {
+  color: var(--faint);
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.chat-res-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 8px 0;
+}
+
+.chat-res-search input::placeholder {
+  color: var(--faint);
+}
+
+.chat-res-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+.chat-side-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  height: var(--chat-topbar-h);
+  margin: 0 -16px;
+  padding: 0 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.chat-side-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-side-icon:hover {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-side-expand {
+  display: none;
+}
+
+.chat-shell.is-side-collapsed .chat-side-expand {
+  display: inline-flex;
+}
+

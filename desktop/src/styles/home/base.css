@@ -1,0 +1,213 @@
+:root {
+  color-scheme: light;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Segoe UI",
+    sans-serif;
+  --bg: #e8ecf4;
+  --bg-accent: rgba(59, 130, 246, 0.07);
+  --shell: rgba(255, 255, 255, 0.82);
+  --surface: #ffffff;
+  --surface-muted: #f4f7fb;
+  --surface-inset: #eef2f8;
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.12);
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-soft: #94a3b8;
+  --primary: #3b82f6;
+  --primary-deep: #2563eb;
+  --success: #16a34a;
+  --success-bg: rgba(22, 163, 74, 0.1);
+  --warn: #d97706;
+  --warn-bg: rgba(217, 119, 6, 0.1);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.08);
+  --shadow-shell: 0 18px 50px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.04);
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:where(button, input, textarea, select) {
+  font-family: inherit;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  color: var(--text);
+  background: transparent;
+  /* Inset without body scroll — old margin:14px on .widget caused bounce gaps. */
+  padding: 10px;
+}
+
+html.is-opaque-shell,
+html.is-opaque-shell body {
+  background: var(--bg);
+}
+
+html.is-opaque-shell body {
+  padding: 0;
+}
+
+html.is-opaque-shell body::before {
+  inset: 0;
+  border-radius: 0;
+}
+
+html.is-opaque-shell .widget {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* The home window is sized to the page it shows: the page fills the window
+   height, so the last card ends with the window instead of floating above a
+   blank gap. */
+html.is-main-fitted,
+html.is-main-fitted body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.is-main-fitted .widget {
+  height: 100%;
+  max-height: 100%;
+}
+
+html.is-main-fitted .main-panels {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+html[data-os="windows"] {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+
+html[data-os="windows"] .widget {
+  padding: 10px 12px;
+}
+
+/* The home window is as tall as the work area on Windows. Let the page use
+   that height: the footer stays at the bottom and the agent card grows into
+   the leftover space, instead of a blank gap under a short card. */
+html[data-os="windows"] .main-panels {
+  display: flex;
+  flex-direction: column;
+}
+
+html[data-os="windows"] .main-panel.is-active {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+html[data-os="windows"] .agents-main {
+  flex: 1 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+html[data-os="windows"] .agents-main > .ws-chip,
+html[data-os="windows"] .agents-main > .health-card {
+  flex: 0 0 auto;
+}
+
+html[data-os="windows"] .runtime-section,
+html[data-os="windows"] .main-panel.is-active > .widget-section:last-child {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+html[data-os="windows"] .runtime-section {
+  display: flex;
+  flex-direction: column;
+}
+
+html[data-os="windows"] .runtime-section > .runtime-tabs,
+html[data-os="windows"] .runtime-section > .runtime-tabs-more {
+  flex: 0 0 auto;
+}
+
+html[data-os="windows"] .runtime-panels {
+  flex: 1 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A tall window needs the agent to look like a card, not like loose text on
+   an empty page. */
+html[data-os="windows"] .runtime-panels > .runtime:not(.has-hero) {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+html[data-os="windows"] .runtime-panels > .runtime {
+  flex: 0 0 auto;
+}
+
+/* The card on screen takes the leftover height. It never shrinks below its
+   content, so a long agent list still scrolls instead of being cut off. */
+html[data-os="windows"] .runtime-panels > article.runtime:last-of-type {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+/* Windows scrollbars are wide and eat the narrow agent panel. */
+html[data-os="windows"] .main-panels {
+  scrollbar-width: thin;
+}
+
+html[data-os="windows"] .main-panels::-webkit-scrollbar {
+  width: 8px;
+}
+
+html[data-os="windows"] .main-panels::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+}
+
+html[data-os="windows"] .health-card-copy h2,
+html[data-os="windows"] .agents-security-copy h2,
+html[data-os="windows"] .main-tab,
+html[data-os="windows"] .btn-scan,
+html[data-os="windows"] .health-pill {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 10px;
+  border-radius: calc(var(--radius-lg) + 4px);
+  background-image: radial-gradient(rgba(15, 23, 42, 0.05) 0.6px, transparent 0.6px);
+  background-size: 14px 14px;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
