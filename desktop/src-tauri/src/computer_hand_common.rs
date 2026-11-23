@@ -185,6 +185,10 @@ pub(crate) struct Shot {
 /// once a screen sits above the main one.
 #[derive(Clone, Copy)]
 pub(crate) struct DisplayBox {
+    /// The CGDisplay id on macOS, where `screencapture` wants to know which
+    /// screen a rect sits on; Windows captures by rect alone, so this reads
+    /// as unused there.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) id: u32,
     pub(crate) origin_x: f64,
     pub(crate) origin_y: f64,
