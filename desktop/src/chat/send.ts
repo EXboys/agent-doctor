@@ -541,7 +541,9 @@ export function createSendController(deps: SendDeps) {
             runtimeForTurn === "cursor" ||
             runtimeForTurn === "workbuddy") &&
           elevated,
-        fullAuto: (runtimeForTurn === "codex" || runtimeForTurn === "openclaw") && elevated,
+        // Codex full-auto makes Codex reject what needs approval instead of
+        // asking. This chat answers Allow itself, so Codex never gets it.
+        fullAuto: runtimeForTurn === "openclaw" && elevated,
         resumeThreadId,
         selectedMcps,
         imagePaths: turn?.sendPaths ?? [],

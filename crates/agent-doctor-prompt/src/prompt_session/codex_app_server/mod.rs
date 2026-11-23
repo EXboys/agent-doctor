@@ -1488,6 +1488,164 @@ time.sleep(5)
         )));
     }
 
+    /// The chat's auto-approve switch answers Allow itself. With the window's
+    /// control present, Codex must still ask: `never` rejects the call.
+    #[cfg(unix)]
+    #[test]
+    fn auto_approve_chat_still_asks_and_mcp_approval_reaches_the_window() {
+        use crate::prompt_session::util::TEST_ENV_LOCK;
+        use std::fs;
+        use std::path::{Path, PathBuf};
+        use std::sync::Mutex as StdMutex;
+        use tempfile::tempdir;
+
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        fn write_fake_bin(dir: &Path, name: &str, script: &str) -> PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let path = dir.join(name);
+            fs::write(&path, script).expect("write fake bin");
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).unwrap();
+            path
+        }
+
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "fake-codex",
+            r##"#!/usr/bin/env python3
+import json, sys
+
+def read():
+    line = sys.stdin.readline()
+    if not line:
+        return None
+    return json.loads(line)
+
+# initialize
+msg = read()
+assert msg["method"] == "initialize"
+print(json.dumps({"id": msg["id"], "result": {"userAgent": "fake"}}), flush=True)
+msg = read()
+assert msg["method"] == "initialized"
+
+# thread/start
+msg = read()
+assert msg["method"] == "thread/start"
+assert msg["params"]["approvalPolicy"] == "on-request"
+print(json.dumps({"id": msg["id"], "result": {"thread": {"id": "thr_1"}}}), flush=True)
+
+# turn/start
+msg = read()
+assert msg["method"] == "turn/start"
+assert msg["params"]["approvalPolicy"] == "on-request"
+print(json.dumps({"id": msg["id"], "result": {"turn": {"id": "turn_1", "status": "inProgress"}}}), flush=True)
+print(json.dumps({"method": "turn/started", "params": {"turn": {"id": "turn_1"}}}), flush=True)
+print(json.dumps({
+  "id": 99,
+  "method": "mcpServer/elicitation/request",
+  "params": {
+    "serverName": "computer",
+    "message": "Allow the computer MCP server to run tool \"screen_snapshot\"?",
+    "requestedSchema": {"type": "object", "properties": {}},
+    "meta": {"codex_approval_kind": "mcp_tool_call"}
+  }
+}), flush=True)
+
+# wait for decision
+msg = read()
+assert msg["id"] == 99
+assert msg["result"]["action"] == "accept"
+
+print(json.dumps({
+  "method": "item/completed",
+  "params": {"item": {"id": "i1", "type": "agent_message", "text": "codex-ok"}}
+}), flush=True)
+print(json.dumps({"method": "turn/completed", "params": {"turn": {"id": "turn_1"}}}), flush=True)
+import time
+time.sleep(5)
+"##,
+        );
+        std::env::set_var("AGENT_DOCTOR_CODEX_BIN", &bin);
+
+        let control = PromptSessionControl::new();
+        let events = StdMutex::new(Vec::new());
+        let control_for_reply = control.clone();
+        thread::spawn(move || {
+            for _ in 0..200 {
+                thread::sleep(Duration::from_millis(20));
+                if control_for_reply.respond_permission("99", true).is_ok() {
+                    return;
+                }
+            }
+        });
+
+        let report = CodexAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "codex".into(),
+                    prompt: "take a screenshot".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 10,
+                    dangerously_skip_permissions: false,
+                    full_auto: true,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
+                },
+                PromptSessionCancel::new(),
+                Some(control),
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_CODEX_BIN");
+        assert_eq!(
+            report.status,
+            PromptSessionStatus::Succeeded,
+            "summary={} events={:?}",
+            report.summary,
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|e| match e {
+                    PromptSessionEvent::Started { .. } => "started".into(),
+                    PromptSessionEvent::Status { message, .. } => format!("status:{message}"),
+                    PromptSessionEvent::Delta { text, .. } => format!("delta:{text}"),
+                    PromptSessionEvent::PermissionRequest { tool_name, .. } => {
+                        format!("perm:{tool_name}")
+                    }
+                    PromptSessionEvent::StderrLine { line, .. } => format!("err:{line}"),
+                    PromptSessionEvent::Completed { status, .. } => format!("done:{status:?}"),
+                    _ => "other".into(),
+                })
+                .collect::<Vec<_>>()
+        );
+        let evs = events.lock().unwrap();
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::PermissionRequest {
+                tool_name,
+                detail,
+                input_mode,
+                ..
+            } if tool_name == "MCP computer"
+                && detail.contains("screen_snapshot")
+                && input_mode == "choice"
+        )));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::Delta { text, .. } if text.contains("codex-ok")
+        )));
+    }
+
     #[cfg(unix)]
     #[test]
     fn app_server_shutdown_hides_broken_pipe() {
@@ -1594,5 +1752,125 @@ sys.exit(0)
             e,
             PromptSessionEvent::StderrLine { line, .. } if line.to_ascii_lowercase().contains("broken pipe")
         )));
+    }
+
+    /// Real-environment round trip, run by hand:
+    /// `cargo test -p agent-doctor-prompt --lib real_codex_computer_roundtrip -- --ignored --nocapture`
+    ///
+    /// Spawns the machine's real `codex app-server` on the saved service, wires
+    /// the real computer MCP, and answers every approval with Allow — what the
+    /// desktop chat does with 自动审批 on. A screenshot is read-only.
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn real_codex_computer_roundtrip() {
+        use crate::prompt_session::util::TEST_ENV_LOCK;
+        use std::sync::Arc;
+        use std::sync::Mutex as StdMutex;
+        use tempfile::tempdir;
+
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        warm::disable_for_test();
+        // The desktop app registers this at startup. Without it the computer
+        // hand cannot be wired and the turn would be sent without the tools.
+        agent_doctor_mcp::register_browser_mcp_wire_backend();
+
+        let dir = tempdir().unwrap();
+        let control = PromptSessionControl::new();
+        let events = StdMutex::new(Vec::new());
+        let pending_asks: Arc<StdMutex<Vec<(String, String)>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+        let control_for_reply = control.clone();
+        let queue = Arc::clone(&pending_asks);
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(100));
+            let next = queue.lock().ok().and_then(|mut ids| {
+                if ids.is_empty() {
+                    None
+                } else {
+                    Some(ids.remove(0))
+                }
+            });
+            if let Some((request_id, input_mode)) = next {
+                // A choice is the Allow button; a typed question cannot be
+                // auto-answered, so it is declined to keep the turn moving.
+                let _ = control_for_reply.respond_permission(&request_id, input_mode == "choice");
+            }
+        });
+
+        let report = CodexAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "codex".into(),
+                    prompt: "调用一次电脑控制工具 screen_snapshot 截图。成功后只回复：截图完成"
+                        .into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 240,
+                    dangerously_skip_permissions: false,
+                    full_auto: false,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: Some(true),
+                },
+                PromptSessionCancel::new(),
+                Some(control),
+                &mut |ev| {
+                    match &ev {
+                        PromptSessionEvent::Status { message, .. } => {
+                            println!("status: {message}");
+                        }
+                        PromptSessionEvent::Delta { text, .. } => {
+                            println!("delta: {text}");
+                        }
+                        PromptSessionEvent::Thinking { text, .. } => {
+                            println!("thinking: {text}");
+                        }
+                        PromptSessionEvent::TurnError { message, .. } => {
+                            println!("turn-error: {message}");
+                        }
+                        PromptSessionEvent::PermissionRequest {
+                            request_id,
+                            tool_name,
+                            detail,
+                            input_mode,
+                            ..
+                        } => {
+                            println!("permission: {tool_name} / {detail} / {input_mode}");
+                            pending_asks
+                                .lock()
+                                .unwrap()
+                                .push((request_id.clone(), input_mode.clone()));
+                        }
+                        PromptSessionEvent::StderrLine { line, .. } => {
+                            println!("stderr: {line}");
+                        }
+                        _ => {}
+                    }
+                    events.lock().unwrap().push(ev);
+                },
+            )
+            .expect("session");
+        println!("report status: {:?}", report.status);
+        println!("summary: {}", report.summary);
+        println!("log excerpt:\n{}", report.log_excerpt);
+        assert_eq!(
+            report.status,
+            PromptSessionStatus::Succeeded,
+            "summary={}",
+            report.summary
+        );
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                PromptSessionEvent::PermissionRequest { tool_name, .. } if tool_name.starts_with("MCP")
+            )),
+            "the computer tool approval never reached the window"
+        );
     }
 }

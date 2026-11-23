@@ -356,7 +356,7 @@ await check("auto-approve turns on Claude's own switch", async () => {
   eq(roundCalls()[0].args.fullAuto, false, "Claude does not use full-auto");
 });
 
-await check("auto-approve turns on Codex's full-auto instead", async () => {
+await check("auto-approve keeps Codex asking, and the chat answers Allow", async () => {
   reset();
   const { api, promptEl } = newController({
     sessions: [makeSession("s-codex", { runtime: "codex" })],
@@ -367,7 +367,7 @@ await check("auto-approve turns on Codex's full-auto instead", async () => {
 
   await api.sendAsk();
 
-  eq(roundCalls()[0].args.fullAuto, true, "Codex full-auto");
+  eq(roundCalls()[0].args.fullAuto, false, "Codex chat does not use full-auto");
   eq(roundCalls()[0].args.dangerouslySkipPermissions, false, "Codex has no skip-permissions");
 });
 

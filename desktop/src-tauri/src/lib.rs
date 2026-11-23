@@ -573,6 +573,10 @@ async fn start_prompt_session_command(
     let control_for_run = {
         let runtime = options.runtime.as_str();
         let claude_ask = runtime == "claude-code" && !options.dangerously_skip_permissions;
+        // Codex full-auto gets no control, so Codex asks for nothing and
+        // rejects what needs approval. That is for headless runs such as the
+        // wiki ingest. Chat auto-approve must not send it: the chat answers
+        // Allow itself.
         let codex_ask = runtime == "codex" && !options.full_auto;
         let deepseek_ask = runtime == "deepseek-harness";
         // Generic ACP agents answer permission requests through the same cards.
