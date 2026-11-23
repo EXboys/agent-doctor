@@ -87,11 +87,16 @@ window.addEventListener("contextmenu", (event) => {
 // it the first drag only activates the window and Esc never arrives, leaving
 // a dead mask over the whole screen.
 async function reveal(): Promise<void> {
+  // On macOS the webview lives inside a non-activating NSPanel so it can float
+  // over full-screen Spaces without pulling the chat Space forward. Calling
+  // Tauri's show()/setFocus() on the empty host NSWindow would activate the app
+  // and yank macOS back to the chat desktop.
+  if (/\bMac\b/i.test(navigator.userAgent)) {
+    await pinPicker().catch(() => {});
+    return;
+  }
   const current = getCurrentWindow();
   await current.show();
-  // Showing and keying a window can pin it back to the space it opened on,
-  // so the join-every-space behavior is re-asserted after both, once through
-  // tauri and once natively.
   try {
     await current.setVisibleOnAllWorkspaces(true);
   } catch {

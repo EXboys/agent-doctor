@@ -20,6 +20,7 @@ import {
   islandRestore,
   islandSetReading,
   resolvePermissionSession,
+  startRegionCapture,
 } from "../ipc";
 import { permissionView } from "./permission";
 import { buildIslandRows, type IslandPending, type IslandRow, type IslandView } from "./track";
@@ -35,6 +36,7 @@ const scrollHintEl = document.querySelector<HTMLElement>("#island-scroll-hint");
 const actionsEl = document.querySelector<HTMLElement>("#island-actions");
 const errorEl = document.querySelector<HTMLElement>("#island-error");
 const hideIdleEl = document.querySelector<HTMLInputElement>("#island-hide");
+const screenshotEl = document.querySelector<HTMLButtonElement>("#island-screenshot");
 
 let hoverTimer = 0;
 let pointerInside = false;
@@ -1314,6 +1316,16 @@ function boot(): void {
   root?.addEventListener("mouseleave", () => setHover(false));
   hideIdleEl?.addEventListener("change", () => {
     void islandSetHideWhenIdle(hideIdleEl.checked).catch(() => {});
+  });
+  screenshotEl?.addEventListener("mousedown", (event) => {
+    event.stopPropagation();
+  });
+  screenshotEl?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    pointerInside = false;
+    void startRegionCapture().catch((error) => {
+      showError(error);
+    });
   });
   void islandHideWhenIdle()
     .then((hide) => {

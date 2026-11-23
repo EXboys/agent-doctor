@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { screenshotChipsEl } from "../chat-dom";
 import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
-import { startRegionCapture } from "../ipc";
+import { startRegionCapture, takePendingScreenshot } from "../ipc";
 import type { AttachmentsApi } from "./attachments";
 
 export type ScreenshotDeps = {
@@ -29,7 +29,7 @@ export function createScreenshotController(deps: ScreenshotDeps) {
   async function setupScreenshotEvents(): Promise<void> {
     try {
       await listen<{ path: string }>("screenshot-captured", (event) => {
-        deps.getAttachments()?.addAttachmentPaths([event.payload.path]);
+        deps.getAttachments()?.addAttachmentPaths([event.payload.path], true);
       });
       await listen("screenshot-cancelled", () => {
         deps.setStatus(t("chat.screenshotCancelled"), "muted");
@@ -37,6 +37,10 @@ export function createScreenshotController(deps: ScreenshotDeps) {
       await listen<string>("screenshot-failed", (event) => {
         deps.setStatus(withErrorDetail(t("chat.screenshotFailed"), event.payload), "error");
       });
+      const pending = await takePendingScreenshot();
+      if (pending) {
+        deps.getAttachments()?.addAttachmentPaths([pending], true);
+      }
     } catch {
       /* browser preview without Tauri events */
     }

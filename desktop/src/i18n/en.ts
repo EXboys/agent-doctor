@@ -2480,6 +2480,8 @@ export const en = {
     "island.turnStopped": "Stopped",
     "island.hideIdle": "Hide when idle",
     "island.hideIdleHint": "When on, the top bar goes away while no conversation is running.",
+    "island.screenshot": "Screenshot",
+    "island.screenshotHint": "Capture this screen and ask in chat",
     "island.working": "Still going",
     "island.stateWorking": "Working",
     "island.stateWaiting": "Waiting for you",

@@ -2478,6 +2478,8 @@ export const zh = {
     "island.turnStopped": "停了",
     "island.hideIdle": "空闲时隐藏",
     "island.hideIdleHint": "打开后，没有对话在进行时，顶部黑条会消失。",
+    "island.screenshot": "截屏提问",
+    "island.screenshotHint": "截取当前屏幕内容发到对话里分析",
     "island.working": "还在进行",
     "island.stateWorking": "正在做",
     "island.stateWaiting": "在等你",

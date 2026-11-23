@@ -76,8 +76,8 @@ export function createAttachmentsController(deps: AttachmentsDeps) {
     return deps.getPendingAttachments().some((item) => item.kind === "image");
   }
 
-  function addAttachmentPaths(paths: string[]): void {
-    if (deps.isComposerLocked() || paths.length === 0) return;
+  function addAttachmentPaths(paths: string[], allowWhileLocked = false): void {
+    if ((!allowWhileLocked && deps.isComposerLocked()) || paths.length === 0) return;
     let pending = [...deps.getPendingAttachments()];
     let added = 0;
     for (const path of paths) {

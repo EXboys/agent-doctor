@@ -1466,6 +1466,10 @@ export function cancelRegionCapture(): Promise<void> {
   return invoke("cancel_region_capture_command");
 }
 
+export function takePendingScreenshot(): Promise<string | null> {
+  return invoke("take_pending_screenshot_command");
+}
+
 export function pinPicker(): Promise<void> {
   return invoke("pin_picker_command");
 }

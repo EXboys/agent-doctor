@@ -74,6 +74,42 @@ body {
   color: rgba(255, 255, 255, 0.8);
 }
 
+.island-shot {
+  display: none;
+}
+
+.island.is-expanded .island-shot {
+  position: absolute;
+  z-index: 2;
+  top: calc((var(--island-top) - 22px) / 2);
+  left: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.island.is-expanded .island-shot:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.island-shot-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
 .island-switch {
   appearance: none;
   -webkit-appearance: none;
@@ -179,7 +215,8 @@ html.is-status-chip .island.is-expanded {
   border-radius: 18px;
 }
 
-html.is-status-chip .island.is-expanded .island-idle {
+html.is-status-chip .island.is-expanded .island-idle,
+html.is-status-chip .island.is-expanded .island-shot {
   display: none;
 }
 

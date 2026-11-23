@@ -534,7 +534,11 @@ fn apply_once(app: &AppHandle) {
             ),
         );
         (
-            chrome,
+            if crate::commands::is_region_capture_open() {
+                Chrome::Hidden
+            } else {
+                chrome
+            },
             guard.snapshot.clone(),
             guard.parked_ask,
             guard.parked_main,
@@ -1723,6 +1727,28 @@ fn restore_conversation(app: &AppHandle, pin: bool) {
     crate::windows::present_ask_window(app);
     crate::windows::settle_main_window(app, main_rest);
     apply(app);
+}
+
+/// Hide the top bar while a screen-region picker is open, and bring it back after.
+pub(crate) fn on_capture_state_changed(app: &AppHandle) {
+    let capturing = crate::commands::is_region_capture_open();
+    hop(app, move |app| {
+        if capturing {
+            release_island_keyboard(app);
+            let host = app.state::<IslandHost>();
+            let mut guard = host.inner.lock().expect("island");
+            guard.hovering = false;
+            guard.opened = false;
+            guard.reading = false;
+        }
+        apply(app);
+    });
+}
+
+/// Bring the Ask conversation forward after capturing a region on another Space,
+/// without unhiding or unminimizing the home window.
+pub(crate) fn bring_ask_forward(app: &AppHandle) {
+    hop(app, |app| restore_conversation(app, false));
 }
 
 fn activate_app() {

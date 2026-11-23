@@ -57,6 +57,7 @@ pub(crate) fn format_tray_tooltip(
 #[derive(Clone, Copy)]
 struct TrayMenuLabels {
     show: &'static str,
+    screenshot: &'static str,
     switch: &'static str,
     check_project: &'static str,
     diagnose: &'static str,
@@ -73,6 +74,7 @@ fn tray_menu_labels(zh: bool) -> TrayMenuLabels {
     if zh {
         TrayMenuLabels {
             show: "显示 Agent Doctor",
+            screenshot: "截屏提问",
             switch: "切换项目",
             check_project: "检查这个项目",
             diagnose: "诊断",
@@ -87,6 +89,7 @@ fn tray_menu_labels(zh: bool) -> TrayMenuLabels {
     } else {
         TrayMenuLabels {
             show: "Show Agent Doctor",
+            screenshot: "Capture screen to ask",
             switch: "Switch workspace",
             check_project: "Workspace check",
             diagnose: "Run doctor",
@@ -168,6 +171,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
     let doc = load_workspaces().unwrap_or_default();
     let labels = menu_labels(app);
     let show = MenuItem::with_id(app, "show", labels.show, true, None::<&str>)?;
+    let screenshot = MenuItem::with_id(app, "screenshot", labels.screenshot, true, None::<&str>)?;
     let ws_doctor = MenuItem::with_id(
         app,
         "workspace_doctor",
@@ -221,6 +225,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
         app,
         &[
             &show,
+            &screenshot,
             &switch_sub,
             &ws_doctor,
             &doctor,
@@ -278,6 +283,9 @@ pub(crate) fn setup_tray(app: &tauri::App) {
         .tooltip("Agent Doctor")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
+            "screenshot" => {
+                let _ = crate::commands::start_region_capture(app, "tray");
+            }
             "workspace_doctor" => {
                 set_tray_busy(app, Some(menu_labels(app).busy_check));
                 let app_handle = app.clone();
@@ -355,6 +363,7 @@ mod tests {
     fn tray_menu_follows_language() {
         let en = tray_menu_labels(false);
         assert_eq!(en.show, "Show Agent Doctor");
+        assert_eq!(en.screenshot, "Capture screen to ask");
         assert_eq!(en.switch, "Switch workspace");
         assert_eq!(en.check_project, "Workspace check");
         assert_eq!(en.diagnose, "Run doctor");
@@ -367,6 +376,7 @@ mod tests {
 
         let zh = tray_menu_labels(true);
         assert_eq!(zh.show, "显示 Agent Doctor");
+        assert_eq!(zh.screenshot, "截屏提问");
         assert_eq!(zh.switch, "切换项目");
         assert_eq!(zh.check_project, "检查这个项目");
         assert_eq!(zh.diagnose, "诊断");
