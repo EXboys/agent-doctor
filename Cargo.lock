@@ -56,7 +56,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-cluster"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "agent-doctor-core",
  "anyhow",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-core"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-desktop"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "agent-doctor-cluster",
  "agent-doctor-core",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-mcp"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "agent-doctor-core",
  "anyhow",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-ocr"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "objc2",
  "objc2-foundation",
@@ -181,9 +181,10 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-prompt"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "agent-doctor-core",
+ "agent-doctor-mcp",
  "agent-doctor-repair",
  "anyhow",
  "base64 0.23.1",
@@ -197,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-repair"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
@@ -214,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-voice"
-version = "0.1.100-beta.17"
+version = "0.1.100-beta.18"
 dependencies = [
  "block2",
  "objc2",
