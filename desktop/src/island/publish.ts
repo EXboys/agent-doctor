@@ -30,6 +30,12 @@ function labels(): IslandLabels {
 }
 
 let rememberSent: (text: string) => void = () => {};
+let republish: () => void = () => {};
+
+/** The chat list changed outside a turn. The island reads the store again. */
+export function refreshIslandFeed(): void {
+  republish();
+}
 
 /** The sentence the user just sent, so the island can show it before a reply arrives. */
 export function noteIslandUserText(text: string): void {
@@ -104,6 +110,7 @@ export function startIslandPublisher(
     window.clearTimeout(publishTimer);
     publishTimer = window.setTimeout(publishNow, 40);
   };
+  republish = schedule;
 
   const markTyping = () => {
     typingUntil = Date.now() + TYPING_MS;

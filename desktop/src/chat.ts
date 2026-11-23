@@ -146,6 +146,7 @@ import {
   looksLikeBrowserToolCall,
   withTimeoutChat,
 } from "./chat/verify";
+import { refreshIslandFeed } from "./island/publish";
 import { cancelPromptSession, loadChatStore, openSession, removeWorkspace, saveChatStore, setWorkspaceTitle } from "./ipc";
 
 export function applyChatTheme(theme: ChatTheme, persist = true): void {
@@ -291,6 +292,9 @@ export async function hydrateDurableChatStore(): Promise<void> {
   } catch (error) {
     console.warn("Ask: redraw after chat db load failed", error);
   }
+  // The island published once from the browser copy, before this merge.
+  // That copy stops updating once the database is the record.
+  refreshIslandFeed();
   reportMissingTranscript(
     "对话记录没有显示出来。记录还在本地数据库里，点「重新加载」再试一次。",
   );

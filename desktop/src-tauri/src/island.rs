@@ -771,20 +771,18 @@ fn island_frame(
         } else {
             (
                 CHIP_WIDTH,
-                CHIP_HEIGHT,
+                menu_h - 8.0 + CHIP_HEIGHT,
                 screen_x + (screen_w - CHIP_WIDTH) / 2.0,
-                screen_y + menu_h,
+                screen_y,
                 0.0,
             )
         }
     } else {
         let width = PEEK_WIDTH.min((screen_w - 32.0).max(320.0));
         let x = screen_x + (screen_w - width) / 2.0;
-        if notch.is_some() {
-            (width, peek_height + menu_h, x, screen_y, menu_h)
-        } else {
-            (width, peek_height, x, screen_y + menu_h, 0.0)
-        }
+        // The card starts at the top of the screen. The inset keeps the words
+        // under the menu bar, and the black fills what used to be a wallpaper gap.
+        (width, peek_height + menu_h, x, screen_y, menu_h)
     }
 }
 
@@ -2036,7 +2034,7 @@ mod tests {
 
     #[cfg(not(windows))]
     #[test]
-    fn a_screen_without_a_notch_hangs_below_the_menu_bar() {
+    fn a_screen_without_a_notch_sticks_to_the_top() {
         let anchor = TopAnchor {
             notch_x: 0.0,
             notch_w: 0.0,
@@ -2046,16 +2044,16 @@ mod tests {
         let (width, height, x, y, inset) =
             island_frame(Chrome::Pill, 0.0, 0.0, 1440.0, 200.0, Some(&anchor));
         assert_eq!(width, 156.0);
-        assert_eq!(height, 28.0);
-        assert_eq!(y, 24.0);
+        assert_eq!(height, 24.0 - 8.0 + 28.0);
+        assert_eq!(y, 0.0);
         assert_eq!(inset, 0.0);
         assert!((x - (1440.0 - 156.0) / 2.0).abs() < 0.1);
 
         let (_, card_h, _, card_y, card_inset) =
             island_frame(Chrome::Peek, 0.0, 0.0, 1440.0, 200.0, Some(&anchor));
-        assert_eq!(card_y, 24.0);
-        assert_eq!(card_h, 200.0);
-        assert_eq!(card_inset, 0.0);
+        assert_eq!(card_y, 0.0);
+        assert_eq!(card_h, 224.0);
+        assert_eq!(card_inset, 24.0);
     }
 
     #[cfg(not(windows))]
