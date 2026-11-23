@@ -676,6 +676,7 @@ export const en = {
     "chat.screenshotFailed": "Could not capture the screen. Try again.",
     "chat.screenshotRegionHint": "Picking an area: drag to select, Enter for the full screen, Esc to cancel.",
     "chat.screenshotCancelled": "Screenshot cancelled.",
+    "chat.screenshotLocked": "A turn is running: capture again after it finishes.",
     "chat.screenshotChipDiagnose": "Diagnose this image",
     "chat.screenshotChipDiagnosePrompt": "Look at this screenshot. Lead with the answer: what went wrong, the most likely cause, and the next step to fix it.",
     "chat.screenshotChipExtract": "Extract the text",

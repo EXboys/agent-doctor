@@ -676,6 +676,7 @@ export const zh = {
     "chat.screenshotFailed": "截屏失败，请再试一次。",
     "chat.screenshotRegionHint": "正在框选：拖拽选取区域，Enter 整屏，Esc 取消。",
     "chat.screenshotCancelled": "已取消框选。",
+    "chat.screenshotLocked": "这一轮还在跑：等它结束后再截屏提问。",
     "chat.screenshotChipDiagnose": "诊断这张图",
     "chat.screenshotChipDiagnosePrompt": "请看这张截图。先给结论：出了什么问题、最可能的原因是什么，再说下一步怎么处理。",
     "chat.screenshotChipExtract": "提取图中文字",

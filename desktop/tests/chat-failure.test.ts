@@ -305,9 +305,34 @@ async function main() {
     "a write that clears failures is a settings change",
   );
 
+  const deepseek =
+    'LLM HTTP 401 Unauthorized: {"error":{"code":"invalid_request_error","message":"Authentication Fails, Your api key: ****e2e8 is invalid","param":null,"type":"authentication_error"}}';
+  const rejectedKey = explainChatFailure(deepseek);
+  assert(rejectedKey?.kind === "provider_key", "a rejected key stays a key problem");
+  assert(rejectedKey!.message.includes("密钥不对"), "a rejected key is one sentence");
+  assert(!rejectedKey!.message.includes("Authentication"), "the sentence hides the provider body");
+
+  const besideMinimax = explainChatFailure(`${deepseek}\nhttps://api.minimax.io/v1`);
+  assert(
+    besideMinimax?.kind === "provider_key" && !besideMinimax.message.includes("MiniMax"),
+    "a MiniMax address beside another 401 is not a MiniMax key",
+  );
+  const minimaxChat = explainChatFailure(
+    "https://api.minimax.io/v1/models → HTTP 401: invalid api key",
+  );
+  assert(
+    minimaxChat?.kind === "provider_key" && !minimaxChat.message.includes("MiniMax"),
+    "a chat turn does not claim both MiniMax sites were tried",
+  );
+
   const { explainProviderFailure, accountBlockMessage } = await import("../src/friendly-error");
   const provider = explainProviderFailure(balanceRaw, { statusCode: 429 });
   assert(provider.kind === "balance", "provider verify should say balance, not a bad key");
+  const probed = explainProviderFailure(
+    "https://api.minimax.io/v1/models → HTTP 401: invalid api key",
+    { regionsProbed: true },
+  );
+  assert(probed.message.includes("MiniMax"), "verify that walked both MiniMax hosts says so");
   const banner = accountBlockMessage("balance");
   assert(banner.includes("去服务商"), "diagnose banner names the next button");
   assert(!banner.includes("LLM HTTP"), "diagnose banner hides the raw dump");

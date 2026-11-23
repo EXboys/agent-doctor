@@ -11,6 +11,7 @@ import {
   isQuietPhase,
   isRuntimeLog,
   isTransportDump,
+  turnErrorIsSentence,
   mergeToolStep,
   stripLogAnsi,
   readRowStep,
@@ -1011,7 +1012,7 @@ export function createActivityController(deps: ActivityDeps) {
     const text = stripLogAnsi(message).trim();
     if (!text) return;
     pushChatTurnReport(text);
-    if (!plain) {
+    if (!turnErrorIsSentence(plain, text)) {
       appendStderrLine(text);
       return;
     }

@@ -24,6 +24,11 @@ export function isTransportDump(raw: string): boolean {
   return /HTTP\s+\d{3}\b/.test(raw) && raw.includes("{");
 }
 
+/** `plain` marks a sentence already written for a person. An HTTP body is still the log. */
+export function turnErrorIsSentence(plain: boolean, text: string): boolean {
+  return plain && !isTransportDump(stripLogAnsi(text));
+}
+
 /** `[skills] …` / `[state-migrations] …`: a lowercase subsystem tag opening the line. */
 const SUBSYSTEM_TAG = /^\[[a-z][a-z0-9_./:-]*\]\s/;
 

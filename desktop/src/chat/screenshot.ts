@@ -44,7 +44,11 @@ export function createScreenshotController(deps: ScreenshotDeps) {
   void setupScreenshotEvents();
 
   async function captureScreen(): Promise<void> {
-    if (deps.isComposerLocked()) return;
+    if (deps.isComposerLocked()) {
+      // A silent no-op here reads as "the button is broken" — say so.
+      deps.setStatus(t("chat.screenshotLocked"), "warn");
+      return;
+    }
     try {
       await startRegionCapture();
       deps.setStatus(t("chat.screenshotRegionHint"), "muted");

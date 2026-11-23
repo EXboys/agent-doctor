@@ -216,7 +216,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       if (!verify.ok) {
         paint.setResult(
           "error",
-          formatProviderFailure(verify.message, { statusCode: verify.status_code }),
+          formatProviderFailure(verify.message, {
+            statusCode: verify.status_code,
+            regionsProbed: true,
+          }),
         );
         return false;
       }
@@ -247,10 +250,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       if (!probeOk) {
         paint.setResult(
           "error",
-          formatProviderFailure(
-            setup.verify?.message ?? t("diagnose.flow.verifyFailedShort"),
-            { statusCode: setup.verify?.status_code },
-          ),
+          formatProviderFailure(setup.verify?.message ?? t("diagnose.flow.verifyFailedShort"), {
+            statusCode: setup.verify?.status_code,
+            regionsProbed: true,
+          }),
         );
         session.configured = false;
         session.activeStep = "config";
@@ -317,6 +320,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
           "error",
           formatProviderFailure(setup.verify.message ?? t("diagnose.flow.verifyFailedShort"), {
             statusCode: setup.verify.status_code,
+            regionsProbed: true,
           }),
         );
         return;

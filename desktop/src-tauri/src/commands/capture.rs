@@ -35,6 +35,7 @@ fn take_region() -> Option<RegionSession> {
 /// windows are built on the main thread, where Tauri needs it.
 #[tauri::command]
 pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    eprintln!("[screenshot] picker requested by {}", window.label());
     close_overlays(&app, take_region());
     let displays = crate::computer_hand::capture_screen_displays();
     if displays.is_empty() {
@@ -130,6 +131,11 @@ pub async fn complete_region_capture_command(
     .await
     .map_err(|err| err.to_string());
     close_overlays(&app, Some(session));
+    let _ = match &captured {
+        Ok(Ok(path)) => eprintln!("[screenshot] captured {path}"),
+        Ok(Err(message)) => eprintln!("[screenshot] capture failed: {message}"),
+        Err(message) => eprintln!("[screenshot] capture panicked: {message}"),
+    };
     let _ = match captured {
         Ok(Ok(path)) => app.emit_to(
             initiator.clone(),
@@ -149,6 +155,7 @@ pub async fn complete_region_capture_command(
 #[tauri::command]
 pub fn cancel_region_capture_command(app: AppHandle) -> Result<(), String> {
     if let Some(session) = take_region() {
+        eprintln!("[screenshot] cancelled");
         let initiator = session.initiator.clone();
         close_overlays(&app, Some(session));
         let _ = app.emit_to(initiator.clone(), "screenshot-cancelled", ());

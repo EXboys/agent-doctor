@@ -405,7 +405,8 @@ fn fail_run(
     on_event(PromptSessionEvent::TurnError {
         session_id: session_id.to_string(),
         message: message.to_string(),
-        plain: true,
+        // An HTTP body is the log. The desktop writes the sentence from it.
+        plain: !message_is_provider_dump(message),
     });
     on_event(PromptSessionEvent::Completed {
         session_id: session_id.to_string(),
@@ -428,6 +429,19 @@ fn fail_run(
     }
 }
 
+/// `LLM HTTP 401: {...}` is the provider's body. A login marker is a sentence.
+fn message_is_provider_dump(message: &str) -> bool {
+    let lower = message.trim().to_ascii_lowercase();
+    let rest = lower.strip_prefix("llm ").unwrap_or(lower.as_str());
+    let Some(after) = rest.strip_prefix("http ") else {
+        return false;
+    };
+    after
+        .split(|ch: char| !ch.is_ascii_digit())
+        .next()
+        .is_some_and(|part| part.len() == 3 && (part.starts_with('4') || part.starts_with('5')))
+}
+
 fn summarize_answer(answer: &str) -> String {
     let mut summary: String = answer.chars().take(400).collect();
     if summary.chars().count() < answer.chars().count() {
@@ -439,6 +453,40 @@ fn summarize_answer(answer: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_http_body_is_not_shown_as_the_sentence() {
+        let mut events = Vec::new();
+        let _ = fail_run(
+            "ps-1",
+            "doctor",
+            std::path::Path::new("/tmp"),
+            Instant::now(),
+            r#"LLM HTTP 401 Unauthorized: {"error":{"message":"Authentication Fails, Your api key: ****e2e8 is invalid"}}"#,
+            &mut |event| events.push(event),
+        );
+        assert!(matches!(
+            &events[0],
+            PromptSessionEvent::TurnError { plain: false, .. }
+        ));
+    }
+
+    #[test]
+    fn a_login_marker_stays_the_sentence() {
+        let mut events = Vec::new();
+        let _ = fail_run(
+            "ps-1",
+            "doctor",
+            std::path::Path::new("/tmp"),
+            Instant::now(),
+            "doctor_needs_login: official account is not signed in",
+            &mut |event| events.push(event),
+        );
+        assert!(matches!(
+            &events[0],
+            PromptSessionEvent::TurnError { plain: true, .. }
+        ));
+    }
 
     #[test]
     fn locale_signal_comes_from_the_chat_style_block() {

@@ -9,6 +9,7 @@ import {
   isQuietPhase,
   isRuntimeLog,
   isTransportDump,
+  turnErrorIsSentence,
   markTurnLogFailed,
   preferPlainSummary,
   stripLogAnsi,
@@ -97,10 +98,11 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       const text = stripLogAnsi(payload.message).trim();
       if (!text) return;
       run.turnReports.push(text);
-      if (payload.plain) {
+      if (turnErrorIsSentence(payload.plain === true, text)) {
         run.turnNoticeSaved = true;
         session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
       } else {
+        run.turnErrors.push(text);
         appendRunLogMessage(session.messages, text, uid);
       }
       ctx.touchSession(session);

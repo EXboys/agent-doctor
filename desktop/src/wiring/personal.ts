@@ -907,6 +907,7 @@ export function createPersonalController(deps: PersonalDeps) {
           "error",
           formatProviderFailure(report.message, {
             statusCode: report.status_code,
+            regionsProbed: true,
           }),
         );
       }

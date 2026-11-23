@@ -164,7 +164,7 @@ function stripProviderNoise(raw: string): string {
  */
 export function explainProviderFailure(
   error: unknown,
-  opts?: { statusCode?: number | null },
+  opts?: { statusCode?: number | null; regionsProbed?: boolean },
 ): ProviderFailureExplain {
   const status = opts?.statusCode ?? null;
   const raw = stripProviderNoise(errorDetail(error));
@@ -187,8 +187,10 @@ export function explainProviderFailure(
     };
   }
 
-  // Verify already tried MiniMax's China and international hosts before giving up.
+  // That sentence is true only after verify walked MiniMax's other hosts.
+  // A chat log can name a MiniMax address next to some other rejected key.
   if (
+    opts?.regionsProbed === true &&
     /minimaxi?\.(cn|com|io)/.test(lower) &&
     (status === 401 || /http 401|\b1004\b|\b2049\b|invalid api key/.test(lower))
   ) {
@@ -272,7 +274,7 @@ export function explainProviderFailure(
 /** One calm card line: problem + what to do. Never dumps URL/JSON by default. */
 export function formatProviderFailure(
   error: unknown,
-  opts?: { statusCode?: number | null },
+  opts?: { statusCode?: number | null; regionsProbed?: boolean },
 ): string {
   const explained = explainProviderFailure(error, opts);
   return t("provider.fail.combined", {

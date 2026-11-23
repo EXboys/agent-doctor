@@ -20,7 +20,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { appendRunLogMessage } = await import("../src/chat/tool-records");
-const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed, runLogAlreadyHas, runLogFailureLabel } = await import("../src/chat/format");
+const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed, runLogAlreadyHas, runLogFailureLabel, turnErrorIsSentence } = await import("../src/chat/format");
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -62,6 +62,14 @@ assert(
   "an HTTP body is a transport dump",
 );
 assert(!isTransportDump("HTTP 200 ok"), "a status code without a body is not a dump");
+const deepseekBody =
+  'LLM HTTP 401 Unauthorized: {"error":{"message":"Authentication Fails, Your api key: ****e2e8 is invalid"}}';
+assert(isTransportDump(deepseekBody), "a provider HTTP body is a transport dump");
+assert(!turnErrorIsSentence(true, deepseekBody), "that body is not the sentence, even when marked plain");
+assert(
+  turnErrorIsSentence(true, "这台电脑上的 Hermes 太旧，这里还用不了。"),
+  "a sentence marked plain stays the sentence",
+);
 
 const saved = [
   user("你好"),
