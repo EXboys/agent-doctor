@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import type { AskRuntime } from "../ask-resources";
+import { appState, applyNativeAccounts } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { t } from "../i18n";
 import {
@@ -416,6 +417,19 @@ type MenuTab = {
 
 export function createModelPickerController(deps: ModelPickerDeps) {
   let nativeRows: NativeAccountRow[] = [];
+  function rememberNativeRows(rows: NativeAccountRow[]): void {
+    nativeRows = rows;
+    const previous = appState.nativeAccounts;
+    applyNativeAccounts(
+      rows.map((row) => {
+        const prior = previous.find((item) => item.runtime_id === row.runtime_id);
+        if (!prior) return row;
+        if (!row.logged_in && prior.logged_in) return row;
+        return { ...prior, ...row };
+      }),
+      false,
+    );
+  }
   const modelListTriedAt = new Map<string, number>();
   const loadingAccountRuntimes = new Set<string>();
   const probedEmptyRuntimes = new Set<string>();
@@ -668,7 +682,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       modelListTriedAt.delete(catalog.runtimeId);
       probedEmptyRuntimes.delete(catalog.runtimeId);
       const again = await nativeAccountStatus(false);
-      nativeRows = again.rows;
+      rememberNativeRows(again.rows);
       const updated = loggedAccountCatalogFor(catalog.runtimeId, nativeRows);
       if (result.outcome === "using" && updated?.cliReady) {
         syncFeedbackByRuntime.delete(catalog.runtimeId);
@@ -723,7 +737,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         deps.pinSubscriptionModel("");
       }
       const again = await nativeAccountStatus(false);
-      nativeRows = again.rows;
+      rememberNativeRows(again.rows);
       deps.updateContextMeter();
       deps.setStatus(t("chat.modelAccountSignedOut", { account: catalog.label }), "ok");
     } catch (error) {
@@ -1253,7 +1267,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         if (fetched.length === 0) probedEmptyRuntimes.add(runtime);
         else probedEmptyRuntimes.delete(runtime);
         const again = await nativeAccountStatus(false);
-        nativeRows = again.rows;
+        rememberNativeRows(again.rows);
       })
       .catch(() => {
         if ((loggedAccountCatalog()?.models.length ?? 0) === 0) {
@@ -1279,7 +1293,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     });
     void nativeAccountStatus(false)
       .then((accounts) => {
-        nativeRows = accounts.rows;
+        rememberNativeRows(accounts.rows);
         const runtime = deps.selectedRuntime();
         const catalog = loggedAccountCatalog();
         if (catalog?.cliReady) {
@@ -1320,7 +1334,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         officialStatus = official;
         officialFetchedAt = Date.now();
       }
-      if (accounts) nativeRows = accounts.rows;
+      if (accounts) rememberNativeRows(accounts.rows);
       const missing = nativeRows.filter(
         (row) =>
           row.logged_in &&
@@ -1345,7 +1359,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
           ),
         );
         const again = await nativeAccountStatus(false).catch(() => null);
-        if (again) nativeRows = again.rows;
+        if (again) rememberNativeRows(again.rows);
       }
       deps.setProviders(doc.providers);
       const active =

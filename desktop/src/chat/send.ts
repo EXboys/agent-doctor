@@ -10,9 +10,11 @@ import {
 } from "../ask-resources";
 import { getLocale, t } from "../i18n";
 import { appendKnowledgeToPrompt } from "./knowledge-page";
+import { appState } from "../app-state";
 import {
   explainChatFailure,
   formatChatFailureLine,
+  phraseDesktopLoginFailure,
   type ChatFailureExplain,
   withErrorDetail,
 } from "../friendly-error";
@@ -625,7 +627,9 @@ export function createSendController(deps: SendDeps) {
         }
       } else {
         pushChatTurnError(message);
-        const explained = explainChatFailure(message);
+        const row = appState.nativeAccounts.find((item) => item.runtime_id === runtimeForTurn);
+        const explainedRaw = explainChatFailure(message);
+        const explained = explainedRaw ? phraseDesktopLoginFailure(explainedRaw, row) : null;
         if (explained && deps.appendChatFailure && deps.getStore().activeId === chatSessionId) {
           deps.appendChatFailure(explained);
         } else {

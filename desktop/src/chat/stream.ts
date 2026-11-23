@@ -1,6 +1,7 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { formatChatFailureLine, type ChatFailureExplain } from "../friendly-error";
+import { appState } from "../app-state";
+import { formatChatFailureLine, phraseDesktopLoginFailure, type ChatFailureExplain } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import type { PlanStep } from "../plan";
 import { markModelRequest, markTurnStarted } from "./activity";
@@ -251,6 +252,7 @@ export function createStreamController(deps: StreamDeps) {
             payload.status !== "succeeded" &&
             payload.status !== "cancelled" &&
             payload.status !== "timed_out";
+          const completedRuntime = deps.getStore().sessions.find((item) => item.id === completedSessionId)?.runtime;
           // The summary is process output, not a reply: the reply only comes from delta events.
           if (!deps.getTurnHadAssistantText() && !deps.getAssistantRaw().trim() && payload.summary?.trim()) {
             const leftover = preferPlainSummary(payload.summary);
@@ -276,7 +278,7 @@ export function createStreamController(deps: StreamDeps) {
             if (!hadAssistantText && payload.status === "succeeded") {
               // An empty reply from a healthy run is still reportable: mount
               // the failure-style card with just the report action.
-              if (!failureSaid && !showChatTurnFailure(deps, null, { turnStatus: payload.status })) {
+              if (!failureSaid && !showChatTurnFailure(deps, null, { turnStatus: payload.status, runtime: completedRuntime })) {
                 deps.appendChatFailure({
                   kind: "unknown",
                   message: t("chat.emptyReply"),
@@ -292,7 +294,7 @@ export function createStreamController(deps: StreamDeps) {
                 markChatFailureBubbleShown();
                 deps.setStatus(logged, "error");
               } else {
-                failureSaid = showChatTurnFailure(deps, null, { turnStatus: payload.status });
+                failureSaid = showChatTurnFailure(deps, null, { turnStatus: payload.status, runtime: completedRuntime });
                 if (!failureSaid && !hadAssistantText) {
                   const sentence = deps.agentFailedLine();
                   deps.rememberMeta(sentence);
@@ -363,10 +365,14 @@ function showChatTurnFailure(
   explain?: ChatFailureExplain | null,
   context?: { runtime?: string; turnStatus?: string },
 ): boolean {
-  const resolved = explain ?? explainCurrentChatTurnFailure();
-  if (!resolved || !markChatFailureBubbleShown()) {
+  const raw = explain ?? explainCurrentChatTurnFailure();
+  if (!raw || !markChatFailureBubbleShown()) {
     return false;
   }
+  const row = context?.runtime
+    ? appState.nativeAccounts.find((item) => item.runtime_id === context.runtime)
+    : undefined;
+  const resolved = phraseDesktopLoginFailure(raw, row);
   resolved.runtime ??= context?.runtime;
   resolved.turnStatus ??= context?.turnStatus;
   deps.appendChatFailure(resolved);

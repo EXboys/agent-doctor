@@ -1,4 +1,5 @@
-import { explainChatFailure, formatChatFailureLine } from "../friendly-error";
+import { appState } from "../app-state";
+import { explainChatFailure, formatChatFailureLine, phraseDesktopLoginFailure } from "../friendly-error";
 import { t } from "../i18n";
 import { cancelPromptSession, resolvePermissionSession } from "../ipc";
 import { consumeAllowStop, requestAllowStop, resolveChoiceAllow, shareAllow } from "./permission-allow";
@@ -156,8 +157,10 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
         if (!explainedOnLog) {
           const explain =
             explainChatFailure(run.turnReports.join("\n")) ?? explainChatFailure(run.turnErrors.join("\n"));
-          if (explain) {
-            session.messages.push({ id: uid(), role: "meta", content: formatChatFailureLine(explain), at: Date.now() });
+          const row = appState.nativeAccounts.find((item) => item.runtime_id === session.runtime);
+          const phrased = explain ? phraseDesktopLoginFailure(explain, row) : null;
+          if (phrased) {
+            session.messages.push({ id: uid(), role: "meta", content: formatChatFailureLine(phrased), at: Date.now() });
           } else if (noReply) {
             session.messages.push({ id: uid(), role: "meta", content: agentFailedLine(session.runtime), at: Date.now() });
           }

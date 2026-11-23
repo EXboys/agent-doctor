@@ -27,7 +27,14 @@ function assert(cond: boolean, msg: string) {
 }
 
 async function main() {
-  const { explainChatFailure, missingProviderFieldsMessage } = await import("../src/friendly-error");
+  const {
+    explainChatFailure,
+    missingProviderFieldsMessage,
+    desktopNeedsAnotherLogin,
+    cliReadyToUse,
+    phraseDesktopLoginFailure,
+    formatChatFailureLine,
+  } = await import("../src/friendly-error");
 
   const glm404 =
     "unexpected status 404 Not Found: Unknown error, url: https://open.bigmodel.cn/api/paas/v4/responses";
@@ -130,6 +137,38 @@ async function main() {
   assert(
     cliUnauthed!.actions.includes("native") && !cliUnauthed!.message.includes("密钥"),
     "ACP CLI unauthed offers Open Native and never mentions a pasted key",
+  );
+  assert(
+    !desktopNeedsAnotherLogin({ logged_in: true, desktop_logged_in: true, desktop_needs_sync: false }),
+    "a ready command line does not ask for another sign-in",
+  );
+  assert(
+    desktopNeedsAnotherLogin({ logged_in: false, desktop_logged_in: true, desktop_needs_sync: true }),
+    "desktop signed in and the command line not ready needs another sign-in",
+  );
+  assert(cliReadyToUse({ logged_in: true }), "a signed-in command line is ready");
+  assert(!cliReadyToUse({ logged_in: true, desktop_needs_sync: true }), "a pending desktop sync is not ready");
+  const desktopOnly = { logged_in: false, desktop_logged_in: true, desktop_needs_sync: true };
+  const desktopSentence = phraseDesktopLoginFailure(cliUnauthed!, desktopOnly);
+  assert(desktopSentence.message === "桌面登了，还要在这里再登一次。", "desktop sign-in uses the one sentence");
+  assert(desktopSentence.next === "", "the desktop sentence has no second instruction");
+  assert(
+    formatChatFailureLine(desktopSentence) === "桌面登了，还要在这里再登一次。",
+    "the failure line is that sentence alone",
+  );
+  assert(
+    cliUnauthed!.message !== desktopSentence.message,
+    "someone who never signed in on the desktop still gets the generic sign-in sentence",
+  );
+  const readyAccount = { logged_in: true, desktop_logged_in: true, desktop_needs_sync: false };
+  assert(
+    phraseDesktopLoginFailure(cliUnauthed!, readyAccount).message === cliUnauthed!.message,
+    "a ready account keeps the generic sign-in sentence",
+  );
+  const cursorOwnAccount = explainChatFailure("Cursor 要用它自己的账号");
+  assert(
+    phraseDesktopLoginFailure(cursorOwnAccount!, desktopOnly).message === cursorOwnAccount!.message,
+    "other native sign-in copy stays",
   );
 
   const accountModel = explainChatFailure(

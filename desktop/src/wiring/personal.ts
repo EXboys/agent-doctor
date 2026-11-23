@@ -4,7 +4,7 @@ import { setAgentBrandIcon } from "../agent-brand";
 import { isTeamEdition } from "../edition";
 import { appState, applyNativeAccounts } from "../app-state";
 import { escapeHtml } from "../format";
-import { formatProviderFailure, missingProviderFieldsMessage, teamupsLoginFailure, withProviderFailure, type ProviderField } from "../friendly-error";
+import { cliReadyToUse, desktopNeedsAnotherLogin, formatProviderFailure, missingProviderFieldsMessage, teamupsLoginFailure, withProviderFailure, type ProviderField } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
 import { setProviderBrandIcon } from "../provider-brand";
@@ -466,9 +466,11 @@ export function createPersonalController(deps: PersonalDeps) {
       note.className = "provider-item-note";
       const noteText = busy
         ? t("native.loggingIn")
-        : row.using_subscription || row.logged_in
-          ? t("native.using", { account })
-          : t("native.onlyTool");
+        : desktopNeedsAnotherLogin(row)
+          ? t("account.desktopAgain")
+          : cliReadyToUse(row) || row.using_subscription
+            ? t("account.ready")
+            : t("native.onlyTool");
       note.textContent = noteText;
       note.title = busy ? t("native.loggingInHint") : noteText;
       sub.append(chip, note);

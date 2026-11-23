@@ -700,3 +700,31 @@ export function formatChatFailureLine(explain: ChatFailureExplain): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/** Desktop app is signed in, and the command-line side still is not. */
+export function desktopNeedsAnotherLogin(row: {
+  logged_in: boolean;
+  desktop_logged_in?: boolean;
+  desktop_needs_sync?: boolean;
+}): boolean {
+  return Boolean(row.desktop_logged_in && (row.desktop_needs_sync || !row.logged_in));
+}
+
+/** Command line can answer with this account. */
+export function cliReadyToUse(row: { logged_in: boolean; desktop_needs_sync?: boolean }): boolean {
+  return Boolean(row.logged_in && !row.desktop_needs_sync);
+}
+
+/**
+ * The bare "Authentication required" sentence, only when this account's row
+ * already says the desktop app is signed in. Other sign-in failures stay as they are.
+ */
+export function phraseDesktopLoginFailure<T extends ChatFailureExplain>(
+  explain: T,
+  row: { logged_in: boolean; desktop_logged_in?: boolean; desktop_needs_sync?: boolean } | null | undefined,
+): T {
+  if (!row || !desktopNeedsAnotherLogin(row)) return explain;
+  if (explain.kind !== "session_expired" || !explain.actions.includes("native")) return explain;
+  if (explain.message !== t("chat.fail.cliAuthRequired.message")) return explain;
+  return { ...explain, message: t("account.desktopAgain"), next: "" };
+}

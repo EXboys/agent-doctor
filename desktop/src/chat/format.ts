@@ -1,5 +1,6 @@
 import type { AskRuntime } from "../ask-resources";
-import { explainChatFailure, formatChatFailureLine } from "../friendly-error";
+import { appState } from "../app-state";
+import { explainChatFailure, formatChatFailureLine, phraseDesktopLoginFailure } from "../friendly-error";
 import { t, type MessageKey } from "../i18n";
 import type { ChatMessage, ToolStep } from "./types";
 import { runtimeDisplayName } from "./runtime";
@@ -116,8 +117,9 @@ export function agentFailedLine(runtime: AskRuntime): string {
  * the generic “it reported an error”.
  */
 export function runLogFailureLabel(content: string, runtime: AskRuntime): string {
+  const row = appState.nativeAccounts.find((item) => item.runtime_id === runtime);
   const explained = explainChatFailure(content);
-  if (explained) return formatChatFailureLine(explained);
+  if (explained) return formatChatFailureLine(phraseDesktopLoginFailure(explained, row));
   return agentFailedLine(runtime);
 }
 
