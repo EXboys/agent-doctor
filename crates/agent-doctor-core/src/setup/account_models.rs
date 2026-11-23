@@ -1023,6 +1023,13 @@ pub fn resolve_zcode_account_selection(model: Option<&str>) -> Option<(String, S
     resolve_zcode_account_selection_in_dir(&zcode_v2, builtin.as_ref(), model)
 }
 
+/// Resolve `(providerId, modelId, reasoningLevel)` for launching ZCode headless CLI.
+pub fn resolve_zcode_account_launch(model: Option<&str>) -> Option<(String, String, String)> {
+    let zcode_v2 = home_join(".zcode/v2");
+    let builtin = load_zcode_builtin_json(&zcode_v2);
+    resolve_zcode_account_launch_in_dir(&zcode_v2, builtin.as_ref(), model)
+}
+
 fn run_cli_with_timeout(mut cmd: std::process::Command, timeout: Duration) -> Result<String> {
     let mut child = cmd.spawn().context("failed to spawn model list command")?;
     let stdout = child.stdout.take().context("missing stdout")?;
@@ -1790,45 +1797,36 @@ fn active_zcode_account_providers(zcode_v2: &Path) -> Vec<String> {
         })
         .filter(|f| f == "bigmodel" || f == "zai");
 
-    let has_bigmodel_oauth = nonempty_json_str(map.get("oauth:bigmodel:access_token"));
-    let has_zai_oauth = nonempty_json_str(map.get("oauth:zai:access_token"));
-    let has_jwt = nonempty_json_str(map.get("zcodejwttoken"));
-
-    let family = if let Some(ref pref) = setting_family {
-        pref.as_str()
-    } else if has_bigmodel_oauth {
-        "bigmodel"
-    } else if has_zai_oauth {
-        "zai"
-    } else {
-        "bigmodel"
-    };
-
-    let mut providers = Vec::new();
-    let mut push_unique = |id: String| {
-        if !id.is_empty() && !providers.contains(&id) {
-            providers.push(id);
-        }
-    };
-
+    // ZCode standalone CLI (`zcode.cjs`) only registers `individual-coding-plan`
+    // account providers and only marks them entitled when `account-provider:*:identity`
+    // exists in `credentials.json`. Desktop-only `zcodejwttoken` (`*-start-plan`) or
+    // unsynced `oauth:*:access_token` entries cannot run headless CLI turns.
+    let mut identities = Vec::new();
     for (key, val) in map {
         if let Some(rest) = key.strip_prefix("account-provider:") {
             if let Some(provider_id) = rest.strip_suffix(":identity") {
-                if nonempty_json_str(Some(val)) {
-                    push_unique(provider_id.to_string());
+                if !provider_id.ends_with("-start-plan") && nonempty_json_str(Some(val)) {
+                    identities.push(provider_id.to_string());
                 }
             }
         }
     }
+    identities.sort();
+    identities.dedup();
 
-    if has_bigmodel_oauth {
-        push_unique("account:bigmodel-individual-coding-plan".to_string());
+    let mut providers = Vec::new();
+    if let Some(pref) = setting_family {
+        let preferred_prefix = format!("account:{pref}-");
+        for id in &identities {
+            if id.starts_with(&preferred_prefix) {
+                providers.push(id.clone());
+            }
+        }
     }
-    if has_zai_oauth {
-        push_unique("account:zai-individual-coding-plan".to_string());
-    }
-    if has_jwt {
-        push_unique(format!("account:{family}-start-plan"));
+    for id in identities {
+        if !providers.contains(&id) {
+            providers.push(id);
+        }
     }
 
     providers
@@ -1928,6 +1926,78 @@ pub fn resolve_zcode_account_selection_in_dir(
         }
     }
     None
+}
+
+pub fn zcode_default_reasoning_level(
+    provider_id: &str,
+    model_id: &str,
+    builtin: Option<&Value>,
+) -> String {
+    if let Some(rules) = builtin
+        .and_then(|v| v.pointer("/config/modelConfigRules/builtinProviderModelRules"))
+        .and_then(Value::as_array)
+    {
+        for rule in rules.iter().rev() {
+            let matches_provider =
+                rule.get("providerId").and_then(Value::as_str) == Some(provider_id);
+            let matches_model = rule
+                .get("modelId")
+                .and_then(Value::as_str)
+                .is_some_and(|m| m.eq_ignore_ascii_case(model_id));
+            if matches_provider && matches_model {
+                if let Some(level) = pick_reasoning_level_from_rule(rule) {
+                    return level;
+                }
+            }
+        }
+    }
+
+    let tail = model_id
+        .rsplit('/')
+        .next()
+        .unwrap_or(model_id)
+        .trim()
+        .to_ascii_lowercase();
+    if tail == "glm-5"
+        || tail.starts_with("glm-5-turbo")
+        || tail.starts_with("glm-5.1")
+        || tail.starts_with("glm-5v")
+        || tail.starts_with("glm-4")
+    {
+        "enabled".to_string()
+    } else if tail.starts_with("glm") {
+        "high".to_string()
+    } else {
+        "enabled".to_string()
+    }
+}
+
+fn pick_reasoning_level_from_rule(rule: &Value) -> Option<String> {
+    let values = rule
+        .pointer("/config/optionSpecs/reasoningLevel/values")
+        .and_then(Value::as_array)?;
+    let strs: Vec<&str> = values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if strs.contains(&"high") {
+        Some("high".to_string())
+    } else {
+        strs.last().map(|s| (*s).to_string())
+    }
+}
+
+pub fn resolve_zcode_account_launch_in_dir(
+    zcode_v2: &Path,
+    builtin: Option<&Value>,
+    requested_model: Option<&str>,
+) -> Option<(String, String, String)> {
+    let (provider_id, model_id) =
+        resolve_zcode_account_selection_in_dir(zcode_v2, builtin, requested_model)?;
+    let reasoning_level = zcode_default_reasoning_level(&provider_id, &model_id, builtin);
+    Some((provider_id, model_id, reasoning_level))
 }
 
 pub fn account_model_allowed(allowed: &[String], model: &str) -> bool {
@@ -2204,30 +2274,50 @@ mod tests {
             r#"{"providerFamilyDomain":"bigmodel"}"#,
         )
         .unwrap();
+        // Desktop-only tokens (`zcodejwttoken` / unsynced `oauth:*`) do not entitle ZCode CLI.
         fs::write(
             zcode_dir.path().join("credentials.json"),
             r#"{"oauth:bigmodel:access_token":"tok","zcodejwttoken":"jwt"}"#,
         )
         .unwrap();
-        let zcode = zcode_account_models_from_dir(zcode_dir.path(), None);
+        assert!(zcode_account_models_from_dir(zcode_dir.path(), None)
+            .models
+            .is_empty());
         assert_eq!(
-            zcode.models,
-            vec!["GLM-5.3", "GLM-5.3-Flash", "GLM-5.2", "GLM-5-Turbo"]
+            resolve_zcode_account_launch_in_dir(zcode_dir.path(), None, None),
+            None
         );
+
+        // Once CLI login records `account-provider:*:identity`, Coding Plan models resolve
+        // with a valid `reasoningLevel` option while Desktop-only `start-plan` stays excluded.
+        fs::write(
+            zcode_dir.path().join("credentials.json"),
+            r#"{
+                "oauth:bigmodel:access_token":"tok",
+                "zcodejwttoken":"jwt",
+                "account-provider:account:bigmodel-start-plan:identity":"desktop-only",
+                "account-provider:account:bigmodel-individual-coding-plan:identity":"cli-id"
+            }"#,
+        )
+        .unwrap();
+        let zcode = zcode_account_models_from_dir(zcode_dir.path(), None);
+        assert_eq!(zcode.models, vec!["GLM-5.3", "GLM-5.3-Flash"]);
         assert_eq!(zcode.default_model.as_deref(), Some("GLM-5.3"));
         assert_eq!(
-            resolve_zcode_account_selection_in_dir(zcode_dir.path(), None, Some("glm-5.2")),
+            resolve_zcode_account_launch_in_dir(zcode_dir.path(), None, Some("GLM-5.3-Flash")),
             Some((
-                "account:bigmodel-start-plan".to_string(),
-                "GLM-5.2".to_string()
+                "account:bigmodel-individual-coding-plan".to_string(),
+                "GLM-5.3-Flash".to_string(),
+                "high".to_string(),
             ))
         );
         assert_eq!(
-            resolve_zcode_account_selection_in_dir(zcode_dir.path(), None, Some("GLM-5.3")),
-            Some((
-                "account:bigmodel-individual-coding-plan".to_string(),
-                "GLM-5.3".to_string()
-            ))
+            zcode_default_reasoning_level(
+                "account:bigmodel-individual-coding-plan",
+                "GLM-5-Turbo",
+                None
+            ),
+            "enabled"
         );
     }
 }

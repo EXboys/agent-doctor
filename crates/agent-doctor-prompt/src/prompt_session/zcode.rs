@@ -28,7 +28,9 @@ use super::{
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
 use agent_doctor_core::adapters::{locate_zcode_headless, zcode_bundled_provider_config};
-use agent_doctor_core::session_env::{format_command_display, overlay_uses_native_account};
+use agent_doctor_core::session_env::{
+    format_command_display, overlay_uses_native_account, scrub_subscription_gateway_env,
+};
 use agent_doctor_core::session_launch::resolve_session_cwd;
 use agent_doctor_core::setup::MODEL_ENV;
 
@@ -136,8 +138,8 @@ fn run_zcode(
                 let raw = stream
                     .error
                     .unwrap_or_else(|| combine_output(&stdout, &stderr));
-                let (message, plain) = if let Some(text) = plain_zcode_error(&raw) {
-                    (text, true)
+                let (message, plain) = if zcode_cli_auth_required(&raw) {
+                    ("Authentication required".to_string(), false)
                 } else if raw.trim().is_empty() {
                     (ZCODE_NOT_READY.to_string(), true)
                 } else {
@@ -254,6 +256,7 @@ fn build_zcode_command(
         locate_zcode_headless().ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
     };
     let mut cmd = agent_doctor_core::exec::command_for_path(&launch.program);
+    scrub_subscription_gateway_env(&mut cmd);
     cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
     if let Some(script) = &launch.script {
         cmd.env("ELECTRON_RUN_AS_NODE", "1");
@@ -264,15 +267,13 @@ fn build_zcode_command(
             cmd.env("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", builtin);
         }
     }
-    if let Some(model) = requested_model {
-        if let Some((provider_id, model_id)) =
-            agent_doctor_core::resolve_zcode_account_selection(Some(model))
-        {
-            if let Ok(cfg_path) = write_zcode_ask_provider_config(&provider_id, &model_id) {
-                cmd.env("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", cfg_path);
-            }
-        }
-    }
+    let selection = agent_doctor_core::resolve_zcode_account_launch(requested_model);
+    let cfg_path = write_zcode_ask_provider_config(
+        selection
+            .as_ref()
+            .map(|(p, m, r)| (p.as_str(), m.as_str(), r.as_str())),
+    )?;
+    cmd.env("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", cfg_path);
     cmd.arg("--prompt")
         .arg(prompt)
         .arg("--cwd")
@@ -297,35 +298,34 @@ fn build_zcode_command(
 }
 
 fn write_zcode_ask_provider_config(
-    provider_id: &str,
-    model_id: &str,
+    selection: Option<(&str, &str, &str)>,
 ) -> Result<std::path::PathBuf> {
     use anyhow::Context;
     use std::hash::{Hash, Hasher};
 
-    let base_path = agent_doctor_core::adapters::util::home_join(".zcode/v2/provider_config.json");
-    let mut root = std::fs::read_to_string(&base_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .filter(|val| {
-            val.get("schemaVersion").and_then(Value::as_i64) == Some(1)
-                && val.get("config").is_some_and(Value::is_object)
-        })
-        .unwrap_or_else(|| {
-            serde_json::json!({
-                "schemaVersion": 1,
-                "config": {
-                    "providerConfigRules": { "providerRules": [] },
-                    "modelConfigRules": { "providerModelRules": [], "manualProviderModelRules": [] }
-                }
-            })
-        });
-    if let Some(cfg) = root.get_mut("config").and_then(Value::as_object_mut) {
+    // Clean-room personal provider config: never inherit `~/.zcode/v2/provider_config.json`,
+    // which may contain stale third-party provider rules (e.g. MiniMax) configured in ZCode
+    // Desktop. ZCode also validates `defaultModelSelection.options.reasoningLevel`; omitting
+    // `options` makes `isSelectable` reject the selection and fall back across all providers.
+    let mut root = serde_json::json!({
+        "schemaVersion": 1,
+        "config": {
+            "providerConfigRules": { "providerRules": [] },
+            "modelConfigRules": { "providerModelRules": [], "manualProviderModelRules": [] }
+        }
+    });
+    if let (Some((provider_id, model_id, reasoning_level)), Some(cfg)) = (
+        selection,
+        root.get_mut("config").and_then(Value::as_object_mut),
+    ) {
         cfg.insert(
             "defaultModelSelection".into(),
             serde_json::json!({
                 "providerId": provider_id,
                 "modelId": model_id,
+                "options": {
+                    "reasoningLevel": reasoning_level,
+                },
             }),
         );
     }
@@ -608,20 +608,18 @@ fn payload_message(payload: &Value) -> Option<String> {
     }
 }
 
-fn plain_zcode_error(raw: &str) -> Option<String> {
+fn zcode_cli_auth_required(raw: &str) -> bool {
     let lower = raw.to_ascii_lowercase();
-    if raw.contains("未登录")
+    raw.contains("未登录")
         || raw.contains("请登录")
         || raw.contains("请先登录")
         || lower.contains("not logged")
         || lower.contains("please log in")
         || lower.contains("authentication required")
-        || lower.contains("unauthorized")
-    {
-        Some(ZCODE_NOT_READY.to_string())
-    } else {
-        None
-    }
+        || lower.contains("select a model before continuing")
+        || lower.contains("no available models")
+        || lower.contains("standalone account provider")
+        || lower.contains("project_token_")
 }
 
 #[cfg(test)]
@@ -686,9 +684,81 @@ mod tests {
         );
         assert!(events.is_empty());
         assert_eq!(turn.error.as_deref(), Some("未登录"));
-        assert_eq!(
-            plain_zcode_error(turn.error.as_deref().unwrap_or("")).as_deref(),
-            Some(ZCODE_NOT_READY)
+        assert!(zcode_cli_auth_required(turn.error.as_deref().unwrap_or("")));
+        assert!(zcode_cli_auth_required("Select a model before continuing"));
+        assert!(!zcode_cli_auth_required(
+            "HTTP 401 Unauthorized: invalid api key"
+        ));
+    }
+
+    #[test]
+    fn ask_provider_config_ignores_dirty_user_providers_and_sets_reasoning_level() {
+        agent_doctor_core::adapters::util::with_test_home(
+            tempfile::tempdir().expect("tempdir").path(),
+            || {
+                let zcode_v2 = agent_doctor_core::adapters::util::home_join(".zcode/v2");
+                std::fs::create_dir_all(&zcode_v2).unwrap();
+                std::fs::write(
+                    zcode_v2.join("provider_config.json"),
+                    r#"{
+                        "schemaVersion": 1,
+                        "config": {
+                            "providerConfigRules": {
+                                "providerRules": [
+                                    {
+                                        "providerId": "minimax-cn",
+                                        "config": { "baseUrl": "https://api.minimaxi.com/anthropic" }
+                                    }
+                                ]
+                            },
+                            "modelConfigRules": { "providerModelRules": [], "manualProviderModelRules": [] }
+                        }
+                    }"#,
+                )
+                .unwrap();
+
+                // Even before CLI login (`selection == None`), a clean empty personal config is written
+                // so ZCode never falls back to stale user `providerRules` like MiniMax.
+                let unauth_path = write_zcode_ask_provider_config(None).expect("clean config");
+                let unauth_json: Value =
+                    serde_json::from_str(&std::fs::read_to_string(&unauth_path).unwrap()).unwrap();
+                assert_eq!(
+                    unauth_json
+                        .pointer("/config/providerConfigRules/providerRules")
+                        .and_then(Value::as_array)
+                        .map(Vec::len),
+                    Some(0)
+                );
+                assert!(unauth_json
+                    .pointer("/config/defaultModelSelection")
+                    .is_none());
+
+                // Once CLI identity exists, `resolve_zcode_account_launch` populates provider, model,
+                // and `options.reasoningLevel` without copying anything from `~/.zcode/v2/provider_config.json`.
+                std::fs::write(
+                    zcode_v2.join("credentials.json"),
+                    r#"{"account-provider:account:bigmodel-individual-coding-plan:identity":"cli-id"}"#,
+                )
+                .unwrap();
+                let launch = agent_doctor_core::resolve_zcode_account_launch(Some("GLM-5.3-Flash"))
+                    .expect("resolved launch");
+                let auth_path =
+                    write_zcode_ask_provider_config(Some((&launch.0, &launch.1, &launch.2)))
+                        .expect("auth config");
+                let auth_raw = std::fs::read_to_string(&auth_path).unwrap();
+                assert!(!auth_raw.contains("minimaxi"));
+                let auth_json: Value = serde_json::from_str(&auth_raw).unwrap();
+                assert_eq!(
+                    auth_json.pointer("/config/defaultModelSelection"),
+                    Some(&serde_json::json!({
+                        "providerId": "account:bigmodel-individual-coding-plan",
+                        "modelId": "GLM-5.3-Flash",
+                        "options": {
+                            "reasoningLevel": "high"
+                        }
+                    }))
+                );
+            },
         );
     }
 

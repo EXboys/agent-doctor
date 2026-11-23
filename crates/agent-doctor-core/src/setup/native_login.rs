@@ -804,10 +804,9 @@ fn desktop_login_state(runtime_id: &str) -> (bool, bool) {
             (desktop, desktop && !workbuddy_logged_in())
         }
         ZCODE_ID => {
-            let has_desktop = crate::adapters::zcode_desktop_path().is_some();
-            let signed_in = zcode_logged_in();
-            let needs_sync = signed_in && zcode_needs_family_sync(zcode_preferred_family());
-            (has_desktop && signed_in, has_desktop && needs_sync)
+            let desktop = zcode_desktop_logged_in();
+            let cli_ready = zcode_logged_in() && !zcode_needs_family_sync(zcode_preferred_family());
+            (desktop, desktop && !cli_ready)
         }
         _ => (false, false),
     }
@@ -1162,36 +1161,42 @@ fn zcode_preferred_family() -> &'static str {
 }
 
 fn zcode_needs_family_sync(preferred_family: &str) -> bool {
-    let Some(setting) = read_json(&home_join(".zcode/v2/setting.json")) else {
-        return false;
-    };
-    if setting
-        .get("providerFamilyDomain")
-        .and_then(Value::as_str)
-        .is_none()
-    {
-        return false;
-    }
     let Some(creds) = read_json(&home_join(".zcode/v2/credentials.json")) else {
         return true;
     };
     let Some(map) = creds.as_object() else {
         return true;
     };
-    let oauth_key = format!("oauth:{preferred_family}:access_token");
-    if nonempty_str(map.get(&oauth_key)) {
-        return false;
-    }
     let family_prefix = format!("account-provider:account:{preferred_family}-");
     let has_family_identity = map.iter().any(|(k, v)| {
-        k.starts_with(&family_prefix) && k.ends_with(":identity") && nonempty_str(Some(v))
+        k.starts_with(&family_prefix)
+            && k.ends_with(":identity")
+            && !k.ends_with("-start-plan:identity")
+            && nonempty_str(Some(v))
     });
     !has_family_identity
 }
 
 fn zcode_logged_in() -> bool {
     read_json(&home_join(".zcode/v2/credentials.json"))
+        .is_some_and(|value| zcode_cli_credentials_are_signed_in(&value))
+}
+
+fn zcode_desktop_logged_in() -> bool {
+    read_json(&home_join(".zcode/v2/credentials.json"))
         .is_some_and(|value| zcode_credentials_are_signed_in(&value))
+}
+
+pub(crate) fn zcode_cli_credentials_are_signed_in(value: &Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    map.iter().any(|(key, val)| {
+        key.starts_with("account-provider:")
+            && key.ends_with(":identity")
+            && !key.ends_with("-start-plan:identity")
+            && nonempty_str(Some(val))
+    })
 }
 
 pub(crate) fn zcode_credentials_are_signed_in(value: &Value) -> bool {
@@ -1207,11 +1212,7 @@ pub(crate) fn zcode_credentials_are_signed_in(value: &Value) -> bool {
             return true;
         }
     }
-    map.iter().any(|(key, val)| {
-        key.starts_with("account-provider:")
-            && key.ends_with(":identity")
-            && nonempty_str(Some(val))
-    })
+    zcode_cli_credentials_are_signed_in(value)
 }
 
 fn dsh_logged_in() -> bool {
@@ -2598,8 +2599,14 @@ mod tests {
         assert!(zcode_credentials_are_signed_in(
             &json!({"oauth:zai:access_token": "enc-tok"})
         ));
-        assert!(zcode_credentials_are_signed_in(
-            &json!({"account-provider:zai-coding-plan:identity": "u_123"})
+        assert!(!zcode_cli_credentials_are_signed_in(
+            &json!({"oauth:zai:access_token": "enc-tok", "zcodejwttoken": "jwt"})
+        ));
+        assert!(!zcode_cli_credentials_are_signed_in(
+            &json!({"account-provider:account:bigmodel-start-plan:identity": "u_desktop"})
+        ));
+        assert!(zcode_cli_credentials_are_signed_in(
+            &json!({"account-provider:account:zai-individual-coding-plan:identity": "u_123"})
         ));
 
         assert!(!dsh_credentials_are_signed_in("{}\n"));
@@ -2733,12 +2740,24 @@ mod tests {
             let zcode_v2 = dir.path().join(".zcode/v2");
             fs::create_dir_all(&zcode_v2).unwrap();
             let creds_path = zcode_v2.join("credentials.json");
+
+            // Desktop-only sign-in shows desktop_logged_in + needs_sync, not CLI-ready.
             fs::write(
                 &creds_path,
                 r#"{"web-remote-control:external-relay:pass_hash":"keep","oauth:bigmodel:access_token":"tok","zcodejwttoken":"jwt"}"#,
             )
             .unwrap();
+            assert!(!is_runtime_logged_in("zcode"));
+            assert_eq!(desktop_login_state("zcode"), (true, true));
+
+            // CLI Coding Plan identity marks ZCode CLI-ready and clears needs_sync.
+            fs::write(
+                &creds_path,
+                r#"{"web-remote-control:external-relay:pass_hash":"keep","oauth:bigmodel:access_token":"tok","zcodejwttoken":"jwt","account-provider:account:bigmodel-individual-coding-plan:identity":"cli-id"}"#,
+            )
+            .unwrap();
             assert!(is_runtime_logged_in("zcode"));
+            assert_eq!(desktop_login_state("zcode"), (true, false));
             assert!(turn_uses_native_account(
                 "zcode",
                 Some("GLM-5.3"),
@@ -2747,11 +2766,15 @@ mod tests {
 
             forget_saved_login("zcode");
             assert!(!is_runtime_logged_in("zcode"));
+            assert_eq!(desktop_login_state("zcode"), (false, false));
             let after: Value =
                 serde_json::from_str(&fs::read_to_string(&creds_path).unwrap()).unwrap();
             assert_eq!(after["web-remote-control:external-relay:pass_hash"], "keep");
             assert!(after.get("zcodejwttoken").is_none());
             assert!(after.get("oauth:bigmodel:access_token").is_none());
+            assert!(after
+                .get("account-provider:account:bigmodel-individual-coding-plan:identity")
+                .is_none());
         });
     }
 }

@@ -11,8 +11,9 @@ mod zhipu;
 
 pub use account_models::{
     account_model_allowed, codex_allowance, cursor_period_usage, ensure_account_models,
-    load_account_models, refresh_account_models, resolve_zcode_account_selection,
-    workbuddy_account_catalog, AccountModelList, CodexAllowance, CursorPeriodUsage,
+    load_account_models, refresh_account_models, resolve_zcode_account_launch,
+    resolve_zcode_account_selection, workbuddy_account_catalog, AccountModelList, CodexAllowance,
+    CursorPeriodUsage,
 };
 pub use account_quota::{
     qoder_credits, workbuddy_credits, zcode_plan_windows, CreditAllowance, PlanWindows,
