@@ -93,27 +93,37 @@ pub struct UpsertPersonalProviderArgs {
 }
 
 #[tauri::command]
-pub fn upsert_personal_provider_command(
+pub async fn upsert_personal_provider_command(
     app: tauri::AppHandle,
     args: UpsertPersonalProviderArgs,
 ) -> Result<PersonalProvidersDocument, String> {
-    let doc = upsert_personal_provider(&UpsertPersonalProviderOptions {
-        id: args.id,
-        name: args.name,
-        url: args.url,
-        api_key: args.key,
-        model: args.model,
-        protocol: args.protocol,
-        activate: args.activate,
+    let doc = tauri::async_runtime::spawn_blocking(move || {
+        upsert_personal_provider(&UpsertPersonalProviderOptions {
+            id: args.id,
+            name: args.name,
+            url: args.url,
+            api_key: args.key,
+            model: args.model,
+            protocol: args.protocol,
+            activate: args.activate,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())?;
+    .await
+    .map_err(|error| error.to_string())??;
     notify_provider_changed(&app);
     Ok(doc)
 }
 
 #[tauri::command]
-pub fn delete_personal_provider_command(id: String) -> Result<PersonalProvidersDocument, String> {
-    delete_personal_provider(&id).map_err(|error| error.to_string())
+pub async fn delete_personal_provider_command(
+    id: String,
+) -> Result<PersonalProvidersDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_personal_provider(&id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

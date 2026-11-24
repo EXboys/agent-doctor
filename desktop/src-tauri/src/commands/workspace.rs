@@ -24,27 +24,47 @@ pub async fn list_workspaces_command() -> WorkspacesDocument {
 }
 
 #[tauri::command]
-pub fn init_workspace_command(
+pub async fn init_workspace_command(
     path: String,
     name: Option<String>,
     git_root: bool,
     activate: Option<bool>,
     app: tauri::AppHandle,
 ) -> Result<InitWorkspaceReport, String> {
-    let report = init_workspace(Some(PathBuf::from(path)), name, git_root)
-        .map_err(|error| error.to_string())?;
-    if activate.unwrap_or(true) {
-        let _ = use_workspace_with_options(
-            &report.name,
-            &UseWorkspaceOptions {
-                backup: true,
-                restart_gateways: false,
-            },
-        );
+    // Registering a project runs git and writes the workspace file. A sync
+    // command would do that on the UI thread.
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        let report = init_workspace(Some(PathBuf::from(path)), name, git_root)
+            .map_err(|error| error.to_string())?;
+        if activate.unwrap_or(true) {
+            let _ = use_workspace_with_options(
+                &report.name,
+                &UseWorkspaceOptions {
+                    backup: true,
+                    restart_gateways: false,
+                },
+            );
+        }
+        Ok::<_, String>(report)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    // The tray menu is AppKit / Win32. Build it back on the UI thread, and
+    // finish before this command returns so the menu matches the new project.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let app_for_ui = app.clone();
+    let workspace_name = report.name.clone();
+    if app
+        .run_on_main_thread(move || {
+            update_tray_tooltip(&app_for_ui);
+            rebuild_tray_menu(&app_for_ui);
+            let _ = app_for_ui.emit("workspace-changed", &workspace_name);
+            let _ = tx.send(());
+        })
+        .is_ok()
+    {
+        let _ = rx.await;
     }
-    update_tray_tooltip(&app);
-    rebuild_tray_menu(&app);
-    let _ = app.emit("workspace-changed", &report.name);
     Ok(report)
 }
 
