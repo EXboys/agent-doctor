@@ -60,18 +60,20 @@ html[data-os="windows"] .chat-log {
   contain: layout style;
 }
 
-/* A new chat lifts the two start cards into the open area, clear of the composer. */
+/* An empty chat centers the start cards in the open area. Only this
+   card-only state goes flex — the log returns to block layout once real
+   messages exist (see the perf note below), so nothing heavy is affected. */
+.chat-log:has(> .chat-start) {
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-log:has(> .chat-start)::before,
 .chat-log:has(> .chat-start)::after {
   content: "";
   display: block;
   min-height: 0;
-}
-
-/* The old flex-grow pair (0.42 / 1.15) sat the cards ~27% down the empty
-   chat; block layout needs explicit spacers instead. */
-.chat-log:has(> .chat-start)::before {
-  height: 32vh;
+  flex: 1 1 0;
 }
 
 .chat-bubble {
@@ -154,11 +156,13 @@ html[data-os="windows"] .chat-log {
   margin: 0;
   padding: 0 1px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.15s ease;
 }
 
 .chat-msg-assistant:is(:hover, :focus-within) > .chat-msg-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-msg-user {

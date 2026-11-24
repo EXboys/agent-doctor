@@ -1,38 +1,60 @@
 .chat-start {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  max-width: 520px;
+  /* Equal thirds on one row; only a very narrow chat wraps a card out. */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
   margin: 0 auto;
   flex: 0 0 auto;
 }
 
 .chat-start-card {
+  flex: 1 1 0;
   display: grid;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
-  padding: 14px;
+  padding: 16px 18px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--panel);
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  min-width: 0;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    transform 0.16s ease;
 }
 
 .chat-start-card:hover {
-  border-color: rgba(47, 111, 237, 0.35);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.chat-start-card:active {
+  transform: translateY(0);
+}
+
+.chat-start-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .chat-start-card strong {
-  font-size: 0.86rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
 }
 
 .chat-start-card span {
   color: var(--muted);
-  font-size: 0.74rem;
-  line-height: 1.4;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .chat-session-block {

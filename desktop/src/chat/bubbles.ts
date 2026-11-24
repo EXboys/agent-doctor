@@ -565,6 +565,20 @@ export function createBubblesController(deps: BubblesDeps) {
     }
     return bubblePlainText(bubble);
   }
+  /** Tool summaries and the folded work trail. Not the reply, and not the change card. */
+  function isProcessRow(node: Element): boolean {
+    return (
+      node.classList.contains("chat-tool-group") ||
+      node.classList.contains("chat-tool-row") ||
+      node.classList.contains("chat-stage-group") ||
+      node.classList.contains("chat-activity") ||
+      node.classList.contains("chat-thinking") ||
+      node.classList.contains("chat-work") ||
+      node.classList.contains("chat-work-stream") ||
+      node.classList.contains("chat-permission") ||
+      node.classList.contains("chat-permission-group")
+    );
+  }
   function turnCopySource(bubble: HTMLElement): string {
     const wrap = assistantMsgWrap(bubble);
     const log = wrap.parentElement;
@@ -593,6 +607,7 @@ export function createBubblesController(deps: BubblesDeps) {
     const roles = children.map((child) => {
       if (child.classList.contains("chat-msg-user")) return "user";
       if (child.classList.contains("chat-msg-assistant")) return "assistant";
+      if (isProcessRow(child)) return "process";
       return "other";
     });
     const owners = assistantTurnCopyOwners(roles);

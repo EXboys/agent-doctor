@@ -7,7 +7,8 @@
  * 3. `domestic`: dual-client suites with a desktop window and a command line
  *    (Cursor, WorkBuddy, Qoder, ZCode).
  * 4. `experimental`: preview / unstable helpers — Hermes (installer needs
- *    overseas / GitHub network) and DeepSeek Harness (experimental preview).
+ *    overseas / GitHub network), DeepSeek Harness (experimental preview),
+ *    and Antigravity (only a Google key or a company Cloud project).
  */
 
 export type AgentCatalogGroupId = "builtin" | "npm" | "domestic" | "experimental";
@@ -28,13 +29,13 @@ const AGENT_ORDER: readonly string[] = [
   "claude-code",
   "openclaw",
   "pi",
-  "antigravity",
   "cursor",
   "workbuddy",
   "qoder",
   "zcode",
   "deepseek-harness",
   "hermes",
+  "antigravity",
 ];
 
 export const BUILTIN_RUNTIME_IDS = ["doctor"] as const;
@@ -42,6 +43,7 @@ export const BUILTIN_RUNTIME_IDS = ["doctor"] as const;
 export const EXPERIMENTAL_RUNTIME_IDS = [
   "hermes",
   "deepseek-harness",
+  "antigravity",
 ] as const;
 
 export const DOMESTIC_DUAL_RUNTIME_IDS = [

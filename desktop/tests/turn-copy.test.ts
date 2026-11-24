@@ -13,12 +13,28 @@ function assert(cond: boolean, msg: string) {
 const oneTurn = assistantTurnCopyOwners([
   "user",
   "assistant",
-  "other",
+  "process",
   "assistant",
-  "other",
+  "process",
   "assistant",
 ]);
 assert(oneTurn.join(",") === "false,false,false,false,false,true", "tools stay in the same turn");
+
+const stillWorking = assistantTurnCopyOwners([
+  "user",
+  "process",
+  "assistant",
+  "process",
+]);
+assert(stillWorking.join(",") === "false,false,false,false", "a process row after the sentence hides the rating");
+
+const answerThenCard = assistantTurnCopyOwners([
+  "user",
+  "process",
+  "assistant",
+  "other",
+]);
+assert(answerThenCard.join(",") === "false,false,true,false", "a change card after the reply keeps the rating");
 
 const twoTurns = assistantTurnCopyOwners([
   "assistant",

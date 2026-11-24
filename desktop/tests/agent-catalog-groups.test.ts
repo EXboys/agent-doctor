@@ -11,7 +11,7 @@ import {
   splitAgentCatalog,
 } from "../src/agent-catalog-groups.ts";
 
-// Only Hermes and DeepSeek Harness are unstable/experimental.
+// Hermes, DeepSeek Harness, and Antigravity are unstable/experimental.
 assert.equal(isExperimentalRuntime("hermes"), true);
 assert.equal(isExperimentalRuntime("deepseek-harness"), true);
 assert.equal(isExperimentalRuntime("workbuddy"), false);
@@ -22,6 +22,7 @@ assert.equal(isExperimentalRuntime("cursor"), false);
 assert.equal(isExperimentalRuntime("claude-code"), false);
 assert.equal(isExperimentalRuntime("openclaw"), false);
 assert.equal(isExperimentalRuntime("pi"), false);
+assert.equal(isExperimentalRuntime("antigravity"), true);
 
 // Dual-client suites install both CLI and desktop app; others install CLI only.
 assert.equal(installsDesktopAndCli("workbuddy"), true);
@@ -41,9 +42,8 @@ assert.equal(agentCatalogGroup("claude-code"), "npm");
 assert.equal(agentCatalogGroup("openclaw"), "npm");
 assert.equal(agentCatalogGroup("pi"), "npm");
 assert.equal(installsDesktopAndCli("pi"), false);
-assert.equal(agentCatalogGroup("antigravity"), "npm");
+assert.equal(agentCatalogGroup("antigravity"), "experimental");
 assert.equal(installsDesktopAndCli("antigravity"), false);
-assert.equal(isExperimentalRuntime("antigravity"), false);
 assert.equal(agentCatalogGroup("cursor"), "domestic");
 assert.equal(agentCatalogGroup("workbuddy"), "domestic");
 assert.equal(agentCatalogGroup("qoder"), "domestic");
@@ -59,6 +59,7 @@ assert(agentCatalogRank("openclaw") < agentCatalogRank("cursor"));
 assert(agentCatalogRank("cursor") < agentCatalogRank("workbuddy"));
 assert(agentCatalogRank("workbuddy") < agentCatalogRank("deepseek-harness"));
 assert(agentCatalogRank("qoder") < agentCatalogRank("hermes"));
+assert(agentCatalogRank("hermes") < agentCatalogRank("antigravity"));
 
 const grouped = groupAgentCatalog([
   { id: "hermes" },
