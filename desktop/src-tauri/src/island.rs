@@ -2024,7 +2024,7 @@ fn shot_preview_data_url(path: &str) -> String {
 
 #[tauri::command]
 pub fn island_clear_shot_command(app: AppHandle) -> Result<(), String> {
-    hop(&app, |app| clear_island_shot(app));
+    hop(&app, clear_island_shot);
     Ok(())
 }
 

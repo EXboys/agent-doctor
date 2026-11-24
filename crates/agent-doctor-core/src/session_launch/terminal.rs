@@ -1,4 +1,4 @@
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::fs;
 #[cfg(target_os = "macos")]
 use std::fs::OpenOptions;
@@ -315,20 +315,13 @@ fn try_open_in_macos_everyday_browser(url: &str) -> bool {
     false
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 pub(crate) fn macos_singleton_lock_chromium_pid(user_data_dir: &Path) -> Option<i32> {
     let target = fs::read_link(user_data_dir.join("SingletonLock")).ok()?;
     let pid = parse_singleton_lock_pid(&target.to_string_lossy())?;
-    #[cfg(target_os = "macos")]
-    {
-        macos_pid_executable_path(pid)
-            .is_some_and(|path| is_chromium_executable_path(&path))
-            .then_some(pid)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Some(pid)
-    }
+    macos_pid_executable_path(pid)
+        .is_some_and(|path| is_chromium_executable_path(&path))
+        .then_some(pid)
 }
 
 #[cfg(any(target_os = "macos", test))]

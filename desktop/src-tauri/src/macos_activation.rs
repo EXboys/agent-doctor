@@ -32,19 +32,19 @@ pub(crate) fn install() {
         hook(
             class,
             sel!(activate),
-            std::mem::transmute(guarded_activate as ActivateImp),
+            std::mem::transmute::<ActivateImp, Imp>(guarded_activate),
             &ORIG_ACTIVATE,
         );
         hook(
             class,
             sel!(activateIgnoringOtherApps:),
-            std::mem::transmute(guarded_ignoring as IgnoringImp),
+            std::mem::transmute::<IgnoringImp, Imp>(guarded_ignoring),
             &ORIG_IGNORING,
         );
         hook(
             class,
             sel!(activateWithOptions:),
-            std::mem::transmute(guarded_options as OptionsImp),
+            std::mem::transmute::<OptionsImp, Imp>(guarded_options),
             &ORIG_OPTIONS,
         );
     });
