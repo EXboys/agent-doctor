@@ -94,6 +94,7 @@ struct JobFilePayload {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct JobPayload {
     id: String,
     text: String,
