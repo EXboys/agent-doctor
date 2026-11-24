@@ -14,7 +14,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -241,6 +241,14 @@ impl Default for IslandHost {
     }
 }
 
+impl IslandHost {
+    /// A panic on another thread poisons this lock. Keep the window open and
+    /// use the state that was left behind.
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|err| err.into_inner())
+    }
+}
+
 /// A tool asking for Allow should stay on the chip. The conversation window
 /// already has the buttons; opening the card only covers them.
 fn pending_opens_card(pending: Option<&IslandPending>) -> bool {
@@ -424,7 +432,7 @@ fn write_chip_place(app: &AppHandle, map: &HashMap<(i32, i32), (f64, f64)>) {
 
 fn ensure_hide_pref_loaded(app: &AppHandle) {
     let host = app.state::<IslandHost>();
-    let mut guard = host.inner.lock().expect("island");
+    let mut guard = host.lock();
     if guard.pref_loaded {
         return;
     }
@@ -439,7 +447,7 @@ fn ensure_hide_pref_loaded(app: &AppHandle) {
 
 fn ensure_chip_place_loaded(app: &AppHandle) {
     let host = app.state::<IslandHost>();
-    let mut guard = host.inner.lock().expect("island");
+    let mut guard = host.lock();
     if guard.chip_place_loaded {
         return;
     }
@@ -488,7 +496,7 @@ fn view_for(chrome: Chrome, snapshot: &Snapshot) -> IslandView {
 pub(crate) fn on_ask_closed(app: &AppHandle) {
     {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         let hide_when_idle = guard.snapshot.hide_when_idle;
         guard.snapshot = Snapshot::default();
         guard.snapshot.hide_when_idle = hide_when_idle;
@@ -506,7 +514,7 @@ fn apply(app: &AppHandle) {
     }
     {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         if guard.applying {
             guard.dirty = true;
             return;
@@ -517,7 +525,7 @@ fn apply(app: &AppHandle) {
     loop {
         apply_once(app);
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         if !guard.dirty {
             guard.applying = false;
             break;
@@ -532,7 +540,7 @@ fn apply_once(app: &AppHandle) {
     let ask_in_front = windows_ask_in_front(app);
     let (chrome, snapshot, parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         // Coming back to the conversation closes the card once. Keep doing it
         // every refresh while Ask stays focused would fight a click that
         // opens the Windows chip again.
@@ -598,7 +606,7 @@ fn apply_once(app: &AppHandle) {
     let view = view_for(chrome, &snapshot);
     let changed = {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         if guard.last_view == view {
             false
         } else {
@@ -616,7 +624,7 @@ fn apply_once(app: &AppHandle) {
 fn reveal_parked(app: &AppHandle, focus_ask: bool) {
     let (parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
-        let guard = host.inner.lock().expect("island");
+        let guard = host.lock();
         (guard.parked_ask, guard.parked_main)
     };
     if parked_main {
@@ -626,7 +634,7 @@ fn reveal_parked(app: &AppHandle, focus_ask: bool) {
         reveal_window(app, "ask", focus_ask);
     }
     let host = app.state::<IslandHost>();
-    let mut guard = host.inner.lock().expect("island");
+    let mut guard = host.lock();
     guard.parked_ask = false;
     guard.parked_main = false;
 }
@@ -652,7 +660,7 @@ fn hide_island(app: &AppHandle) {
         }
     }
     let host = app.state::<IslandHost>();
-    let mut guard = host.inner.lock().expect("island");
+    let mut guard = host.lock();
     guard.placed.clear();
 }
 
@@ -665,7 +673,7 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
     }
     let (rows, pending, reading, measured) = {
         let host = app.state::<IslandHost>();
-        let guard = host.inner.lock().expect("island");
+        let guard = host.lock();
         (
             guard.snapshot.rows,
             pending_opens_card(guard.snapshot.pending.as_ref()),
@@ -703,7 +711,7 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
         );
         let needs_place = {
             let host = app.state::<IslandHost>();
-            let guard = host.inner.lock().expect("island");
+            let guard = host.lock();
             guard.placed.get(&label) != Some(&place_key)
         };
         let was_visible = window.is_visible().unwrap_or(false);
@@ -713,7 +721,7 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
         if needs_place {
             place_island_frame(&window, x, y, width, height);
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             guard.placed.insert(label, place_key);
         }
         set_notch_inset(&window, notch_inset);
@@ -1074,7 +1082,7 @@ fn chip_position_on_monitor(
         let key = work_key(monitor);
         let (drag, saved) = {
             let host = app.state::<IslandHost>();
-            let guard = host.inner.lock().expect("island");
+            let guard = host.lock();
             (
                 guard.chip_drag.get(label).copied(),
                 guard.chip_place.get(&key).copied(),
@@ -1085,7 +1093,7 @@ fn chip_position_on_monitor(
         if drop_saved {
             let map = {
                 let host = app.state::<IslandHost>();
-                let mut guard = host.inner.lock().expect("island");
+                let mut guard = host.lock();
                 guard.chip_place.remove(&key);
                 guard.chip_place.clone()
             };
@@ -1122,7 +1130,7 @@ fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool)
         let key = work_key(monitor);
         let persist = {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             if commit {
                 guard.chip_drag.remove(label);
                 guard.chip_place.insert(key, (x, y));
@@ -1169,7 +1177,7 @@ fn status_chip_drag_size(
         }
     }
     let host = app.state::<IslandHost>();
-    let guard = host.inner.lock().expect("island");
+    let guard = host.lock();
     if guard.last_view.expanded {
         let width = PEEK_WIDTH.min((work_w - 32.0).max(320.0));
         let height = if guard.content_height > 0.0 {
@@ -1248,7 +1256,7 @@ fn refresh_screens(app: &AppHandle) {
         apply(app);
         let shown = {
             let host = app.state::<IslandHost>();
-            let guard = host.inner.lock().expect("island");
+            let guard = host.lock();
             guard.last_view.shown
         };
         if shown {
@@ -1266,7 +1274,7 @@ fn refresh_notch_screens(app: &AppHandle) {
     let sig = screen_signature(app);
     let (changed, applying) = {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         let changed = guard.screen_sig != sig;
         if changed {
             guard.screen_sig = sig;
@@ -1277,7 +1285,7 @@ fn refresh_notch_screens(app: &AppHandle) {
     if changed {
         if applying {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             guard.dirty = true;
         } else {
             apply(app);
@@ -1287,7 +1295,7 @@ fn refresh_notch_screens(app: &AppHandle) {
     // Another app's fullscreen space can order the notch out. Raise it again.
     let shown = {
         let host = app.state::<IslandHost>();
-        let guard = host.inner.lock().expect("island");
+        let guard = host.lock();
         guard.last_view.shown
     };
     if !shown {
@@ -1458,12 +1466,17 @@ unsafe impl Send for OverlayPanel {}
 #[cfg(target_os = "macos")]
 static OVERLAYS: Mutex<Vec<OverlayPanel>> = Mutex::new(Vec::new());
 
+#[cfg(target_os = "macos")]
+fn lock_overlays() -> MutexGuard<'static, Vec<OverlayPanel>> {
+    OVERLAYS.lock().unwrap_or_else(|err| err.into_inner())
+}
+
 /// The notch is a real panel. A normal window is dropped when another app
 /// takes a fullscreen space, even at a high window level.
 #[cfg(target_os = "macos")]
 fn overlay_target(host: &objc2_app_kit::NSWindow) -> &objc2_app_kit::NSWindow {
     let key = host as *const objc2_app_kit::NSWindow as usize;
-    let guard = OVERLAYS.lock().expect("overlays");
+    let guard = lock_overlays();
     if let Some(found) = guard.iter().find(|item| item.host == key) {
         if !found.panel.is_null() {
             return unsafe { &*found.panel.cast() };
@@ -1503,7 +1516,7 @@ fn ensure_overlay_panel(host: &objc2_app_kit::NSWindow) -> *mut objc2_app_kit::N
 
     let key = host as *const NSWindow as usize;
     {
-        let guard = OVERLAYS.lock().expect("overlays");
+        let guard = lock_overlays();
         if let Some(found) = guard.iter().find(|item| item.host == key) {
             return found.panel;
         }
@@ -1540,7 +1553,7 @@ fn ensure_overlay_panel(host: &objc2_app_kit::NSWindow) -> *mut objc2_app_kit::N
     }
     host.orderOut(None);
     let ptr = Retained::into_raw(panel);
-    OVERLAYS.lock().expect("overlays").push(OverlayPanel {
+    lock_overlays().push(OverlayPanel {
         host: key,
         panel: ptr,
     });
@@ -1634,7 +1647,7 @@ fn fold_if_click_is_outside(app: &AppHandle) {
     let on_island = click_lands_on_island(point);
     let refresh = {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         if on_island {
             let reopen = !guard.last_view.expanded;
             guard.folded = false;
@@ -1716,7 +1729,7 @@ fn claim_island_keyboard(app: &AppHandle) {
 fn panel_at(point: objc2_foundation::NSPoint) -> Option<*mut objc2_app_kit::NSWindow> {
     use objc2_app_kit::NSWindow;
 
-    let guard = OVERLAYS.lock().expect("overlays");
+    let guard = lock_overlays();
     for item in guard.iter() {
         if item.panel.is_null() {
             continue;
@@ -1741,7 +1754,7 @@ fn panel_at(point: objc2_foundation::NSPoint) -> Option<*mut objc2_app_kit::NSWi
 fn click_lands_on_island(point: objc2_foundation::NSPoint) -> bool {
     use objc2_app_kit::NSWindow;
 
-    let guard = OVERLAYS.lock().expect("overlays");
+    let guard = lock_overlays();
     for item in guard.iter() {
         if item.panel.is_null() {
             continue;
@@ -1771,7 +1784,7 @@ fn hop(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
 
 fn store_snapshot(app: &AppHandle, input: IslandSnapshotInput) {
     let host = app.state::<IslandHost>();
-    let mut guard = host.inner.lock().expect("island");
+    let mut guard = host.lock();
     let mut next = Snapshot::from(input);
     next.hide_when_idle = guard.snapshot.hide_when_idle;
     if !next.active {
@@ -1794,7 +1807,7 @@ fn restore_conversation(app: &AppHandle, pin: bool) {
     release_island_keyboard(app);
     {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         if pin {
             guard.pinned = true;
         } else {
@@ -1833,7 +1846,7 @@ pub(crate) fn on_capture_state_changed(app: &AppHandle) {
         }
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             if capturing {
                 guard.hovering = false;
                 guard.opened = false;
@@ -1858,7 +1871,7 @@ pub(crate) fn bring_ask_forward(app: &AppHandle) {
 fn open_island_card(app: &AppHandle) {
     {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         guard.hovering = true;
         guard.opened = true;
         guard.folded = false;
@@ -1871,11 +1884,7 @@ fn open_island_card(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 pub(crate) fn island_bar_enabled(app: &AppHandle) -> bool {
     ensure_hide_pref_loaded(app);
-    app.state::<IslandHost>()
-        .inner
-        .lock()
-        .expect("island")
-        .enabled
+    app.state::<IslandHost>().lock().enabled
 }
 
 pub(crate) fn present_island_shot(app: &AppHandle, path: String) {
@@ -1886,7 +1895,7 @@ pub(crate) fn present_island_shot(app: &AppHandle, path: String) {
         let _ = crate::windows::ensure_ask_window(app, &crate::windows::default_ask_runtime());
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             let known = guard.shot_paths.iter().any(|item| item == &path);
             if !known && guard.shot_paths.len() < ISLAND_SHOT_CAP {
                 guard.shot_paths.push(path.clone());
@@ -1949,7 +1958,7 @@ pub fn island_set_hover_command(
         let left = !hovering && !sticky.unwrap_or(false);
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             if hovering {
                 guard.folded = false;
                 if sticky.unwrap_or(false) {
@@ -1976,7 +1985,7 @@ pub fn island_set_reading_command(app: AppHandle, reading: bool) -> Result<(), S
     hop(&app, move |app| {
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             guard.reading = reading;
             if reading {
                 guard.folded = false;
@@ -1995,7 +2004,7 @@ pub fn island_set_content_height_command(app: AppHandle, height: f64) -> Result<
     hop(&app, move |app| {
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             if (guard.content_height - height).abs() < 2.0 {
                 return;
             }
@@ -2037,7 +2046,7 @@ const ISLAND_SHOT_CAP: usize = 4;
 fn clear_island_shot(app: &AppHandle) {
     {
         let host = app.state::<IslandHost>();
-        let mut guard = host.inner.lock().expect("island");
+        let mut guard = host.lock();
         guard.shot_paths.clear();
     }
     let payload = serde_json::json!({ "path": "" });
@@ -2048,25 +2057,14 @@ fn clear_island_shot(app: &AppHandle) {
 
 #[tauri::command]
 pub fn current_island_shot_command(app: AppHandle) -> Vec<String> {
-    app.state::<IslandHost>()
-        .inner
-        .lock()
-        .expect("island")
-        .shot_paths
-        .clone()
+    app.state::<IslandHost>().lock().shot_paths.clone()
 }
 
 /// One picture for the top-bar card. The page draws this directly, so the
 /// preview does not depend on the file URL being allowed.
 #[tauri::command]
 pub fn island_shot_preview_command(app: AppHandle, path: Option<String>) -> String {
-    let stored = app
-        .state::<IslandHost>()
-        .inner
-        .lock()
-        .expect("island")
-        .shot_paths
-        .clone();
+    let stored = app.state::<IslandHost>().lock().shot_paths.clone();
     let wanted = path.unwrap_or_default();
     let chosen = if wanted.is_empty() {
         stored.last().cloned().unwrap_or_default()
@@ -2084,11 +2082,7 @@ pub fn island_forget_shot_command(app: AppHandle, path: String) -> Result<(), St
     let path = path.trim().to_string();
     hop(&app, move |app| {
         let host = app.state::<IslandHost>();
-        host.inner
-            .lock()
-            .expect("island")
-            .shot_paths
-            .retain(|item| item != &path);
+        host.lock().shot_paths.retain(|item| item != &path);
     });
     Ok(())
 }
@@ -2145,7 +2139,7 @@ pub fn island_send_text_command(
     if shot_path.is_some() {
         hop(&app, |app| {
             let host = app.state::<IslandHost>();
-            host.inner.lock().expect("island").shot_paths.clear();
+            host.lock().shot_paths.clear();
         });
     }
     if let Some(path) = shot_path {
@@ -2207,22 +2201,13 @@ pub fn island_open_session_command(app: AppHandle, session_id: String) -> Result
 #[tauri::command]
 pub fn island_hide_when_idle_command(app: AppHandle) -> bool {
     ensure_hide_pref_loaded(&app);
-    app.state::<IslandHost>()
-        .inner
-        .lock()
-        .expect("island")
-        .snapshot
-        .hide_when_idle
+    app.state::<IslandHost>().lock().snapshot.hide_when_idle
 }
 
 #[tauri::command]
 pub fn island_enabled_command(app: AppHandle) -> bool {
     ensure_hide_pref_loaded(&app);
-    app.state::<IslandHost>()
-        .inner
-        .lock()
-        .expect("island")
-        .enabled
+    app.state::<IslandHost>().lock().enabled
 }
 
 #[tauri::command]
@@ -2230,7 +2215,7 @@ pub fn island_set_enabled_command(app: AppHandle, enabled: bool) -> Result<(), S
     hop(&app, move |app| {
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             guard.pref_loaded = true;
             guard.enabled = enabled;
             if !enabled {
@@ -2251,7 +2236,7 @@ pub fn island_set_hide_when_idle_command(app: AppHandle, hide: bool) -> Result<(
     hop(&app, move |app| {
         {
             let host = app.state::<IslandHost>();
-            let mut guard = host.inner.lock().expect("island");
+            let mut guard = host.lock();
             guard.pref_loaded = true;
             guard.snapshot.hide_when_idle = hide;
         }
@@ -2263,12 +2248,7 @@ pub fn island_set_hide_when_idle_command(app: AppHandle, hide: bool) -> Result<(
 
 #[tauri::command]
 pub fn current_island_view_command(app: AppHandle) -> IslandView {
-    app.state::<IslandHost>()
-        .inner
-        .lock()
-        .expect("island")
-        .last_view
-        .clone()
+    app.state::<IslandHost>().lock().last_view.clone()
 }
 
 #[cfg(test)]
@@ -2276,8 +2256,22 @@ mod tests {
     use super::{
         chrome_if_enabled, clamp_chip_to_work, format_chip_place, parse_chip_place, peek_height,
         pending_opens_card, windows_chip_origin, windows_status_chrome, windows_status_frame,
-        Chrome, IslandPending, WorkRect,
+        Chrome, IslandHost, IslandPending, WorkRect,
     };
+
+    #[test]
+    fn a_poisoned_lock_still_returns_the_bar_state() {
+        let host = std::sync::Arc::new(IslandHost::default());
+        let worker = std::sync::Arc::clone(&host);
+        let panicked = std::thread::spawn(move || {
+            let mut guard = worker.lock();
+            guard.enabled = false;
+            panic!("poison the island lock");
+        })
+        .join();
+        assert!(panicked.is_err());
+        assert!(!host.lock().enabled);
+    }
     #[cfg(not(windows))]
     use super::{island_chrome, island_frame, TopAnchor};
 
