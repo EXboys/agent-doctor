@@ -70,7 +70,7 @@ pub(crate) fn start_region_capture(app: &AppHandle, requester: &str) -> Result<(
     eprintln!("[screenshot] picker requested by {requester}");
     CAPTURING.store(false, Ordering::SeqCst);
     let (initiator, from_external_space) = normalize_initiator(requester);
-    let stay_on_island = stay_with_island(app, from_external_space);
+    let stay_on_island = stay_with_island(app, requester, from_external_space);
     // Before any new page is created. Creating one activates the app, and
     // hiding the top bar then hands the keyboard to the conversation window.
     // Either of those swipes to that window's desktop.
@@ -231,26 +231,38 @@ pub async fn complete_region_capture_command(
     Ok(())
 }
 
-/// Mac keeps a shot on the top bar when the chat window is not the screen the
-/// person is looking at. Windows always brings the conversation forward.
-fn stay_with_island(app: &AppHandle, from_external: bool) -> bool {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, from_external);
-        false
+/// A shot started on the island stays on the island card. On macOS the tray
+/// does too, and a shot started in the conversation stays when that window is
+/// on another desktop. A shot started in the conversation on this desktop
+/// comes back to the conversation. On Windows the tray still opens it there.
+fn stay_with_island(app: &AppHandle, requester: &str, from_external: bool) -> bool {
+    if !crate::island::island_bar_enabled(app) {
+        return false;
     }
-    #[cfg(target_os = "macos")]
-    {
-        if !crate::island::island_bar_enabled(app) {
-            return false;
-        }
-        shot_stays_on_island(true, from_external, ask_on_active_space(app))
-    }
+    let outside_chat = if cfg!(target_os = "macos") {
+        from_external
+    } else {
+        requester == "island" || requester.starts_with("island-")
+    };
+    shot_stays_on_island(outside_chat, chat_is_on_another_desktop(app))
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn shot_stays_on_island(macos: bool, from_external: bool, ask_on_active_space: bool) -> bool {
-    macos && (from_external || !ask_on_active_space)
+/// `from_external` is an island or tray shot. `chat_elsewhere` is a macOS
+/// conversation window sitting on another desktop.
+fn shot_stays_on_island(from_external: bool, chat_elsewhere: bool) -> bool {
+    from_external || chat_elsewhere
+}
+
+fn chat_is_on_another_desktop(app: &AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        !ask_on_active_space(app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -892,11 +904,10 @@ mod tests {
     }
 
     #[test]
-    fn mac_shot_stays_on_the_island_unless_chat_is_already_on_this_space() {
-        assert!(super::shot_stays_on_island(true, true, true));
-        assert!(super::shot_stays_on_island(true, true, false));
-        assert!(super::shot_stays_on_island(true, false, false));
-        assert!(!super::shot_stays_on_island(true, false, true));
-        assert!(!super::shot_stays_on_island(false, true, false));
+    fn shot_stays_on_the_island_when_started_there_or_chat_is_on_another_desktop() {
+        assert!(super::shot_stays_on_island(true, false));
+        assert!(super::shot_stays_on_island(true, true));
+        assert!(super::shot_stays_on_island(false, true));
+        assert!(!super::shot_stays_on_island(false, false));
     }
 }

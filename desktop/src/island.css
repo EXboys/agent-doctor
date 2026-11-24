@@ -756,19 +756,19 @@ html.is-status-chip .island.is-dragging * {
 }
 
 html.is-status-chip .island.is-expanded {
-  --island-top: 12px;
+  /* Room for the screenshot button. 12px clips a 22px control into the corner. */
+  --island-top: 38px;
   border-radius: 18px;
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.09),
     0 24px 54px rgba(0, 0, 0, 0.6);
 }
 
-html.is-status-chip .island.is-expanded.is-focus:not(.is-shot) {
-  --island-top: 38px;
+html.is-status-chip .island.is-expanded .island-shot {
+  left: 20px;
 }
 
-html.is-status-chip .island.is-expanded .island-idle,
-html.is-status-chip .island.is-expanded .island-shot {
+html.is-status-chip .island.is-expanded .island-idle {
   display: none;
 }
 

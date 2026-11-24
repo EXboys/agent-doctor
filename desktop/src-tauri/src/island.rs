@@ -5,10 +5,10 @@
 //!
 //! On Windows there is no housing. A rounded chip sits just under the top of
 //! the work area while a turn needs to be seen. A click grows it into the same
-//! card used on macOS (feed, questions, a short reply). It does not hide the
-//! other windows, and screenshot-ask still opens in the conversation. The
-//! person can drag the chip anywhere on its screen; the spot is remembered
-//! until it no longer fits.
+//! card used on macOS (feed, questions, a short reply, screenshot-ask). It does
+//! not hide the other windows. A screenshot started on the card stays on the
+//! card. The person can drag the chip anywhere on its screen; the spot is
+//! remembered until it no longer fits.
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
@@ -1881,7 +1881,6 @@ fn open_island_card(app: &AppHandle) {
 
 /// The shot stays on the current desktop. The conversation window is created
 /// in the background when it is missing, and it is not shown or focused.
-#[cfg(target_os = "macos")]
 pub(crate) fn island_bar_enabled(app: &AppHandle) -> bool {
     ensure_hide_pref_loaded(app);
     app.state::<IslandHost>().lock().enabled
