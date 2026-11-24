@@ -2051,7 +2051,8 @@ fn drain_pending_places(app: &AppHandle) {
     {
         loop {
             let batch: Vec<(String, (f64, f64, bool))> = {
-                let mut guard = app.state::<IslandHost>().lock();
+                let host = app.state::<IslandHost>();
+                let mut guard = host.lock();
                 if guard.pending_place.is_empty() {
                     return;
                 }
@@ -2070,7 +2071,8 @@ fn drain_pending_focus(app: &AppHandle) {
     #[cfg(windows)]
     {
         let wanted = {
-            let mut guard = app.state::<IslandHost>().lock();
+            let host = app.state::<IslandHost>();
+            let mut guard = host.lock();
             std::mem::take(&mut guard.pending_focus)
         };
         if wanted {
