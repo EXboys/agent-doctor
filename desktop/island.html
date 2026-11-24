@@ -38,7 +38,21 @@
         <span data-i18n="island.hideIdle">空闲时隐藏</span>
         <input id="island-hide" class="island-switch" type="checkbox" role="switch" />
       </label>
+      <button id="island-back" class="island-back" type="button" hidden>
+        <svg class="island-back-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M10 3.5 5.5 8 10 12.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span data-i18n="island.backToList">返回</span>
+      </button>
       <div class="island-body">
+        <div id="island-shot-card" class="island-shot-card" hidden></div>
         <div class="island-read-frame">
           <div id="island-detail" class="island-read" hidden></div>
           <button id="island-scroll-hint" class="island-scroll-hint" type="button" data-i18n="island.scrollMore" hidden>下滑看更多</button>

@@ -14,6 +14,8 @@
   <string>项目文件夹有时在「下载」里。允许后才能检查和修复这个项目里的 Agent。</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>需要查找同一网络里的其他苹果电脑，才能把几台电脑连起来一起跑模型。</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>需要在你常用的浏览器里打开登录网页，完成账号授权。</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

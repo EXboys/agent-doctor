@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -24,6 +24,9 @@ struct Overlay {
 struct RegionSession {
     initiator: String,
     from_external_space: bool,
+    /// Mac: the shot stays on the top bar, and the conversation window must not
+    /// pull the user onto its desktop.
+    stay_on_island: bool,
     overlays: Vec<Overlay>,
 }
 
@@ -31,6 +34,10 @@ static REGION: Mutex<Option<RegionSession>> = Mutex::new(None);
 /// True between hiding the dim layer and closing the picker, so the space
 /// follower never orders the dim layer back in front of `screencapture`.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
+/// Bumped whenever a stay-on-this-desktop capture starts or is cancelled early,
+/// so a delayed restore cannot run in the middle of the next capture.
+#[cfg(target_os = "macos")]
+static STAY_GEN: AtomicU64 = AtomicU64::new(0);
 /// Holds a shot taken while the Ask window was closed until `chat.html` boots.
 static PENDING_SHOT: Mutex<Option<String>> = Mutex::new(None);
 
@@ -60,12 +67,24 @@ fn normalize_initiator(label: &str) -> (String, bool) {
 pub(crate) fn start_region_capture(app: &AppHandle, requester: &str) -> Result<(), String> {
     eprintln!("[screenshot] picker requested by {requester}");
     CAPTURING.store(false, Ordering::SeqCst);
+    let (initiator, from_external_space) = normalize_initiator(requester);
+    let stay_on_island = stay_with_island(app, from_external_space);
+    // Before any new page is created. Creating one activates the app, and
+    // hiding the top bar then hands the keyboard to the conversation window.
+    // Either of those swipes to that window's desktop.
+    if stay_on_island {
+        begin_stay(app);
+    } else {
+        release_stay(app);
+    }
     close_overlays(app, take_region());
     let displays = crate::computer_hand::capture_screen_displays();
     if displays.is_empty() {
+        if stay_on_island {
+            end_stay(app);
+        }
         return Err("no display found".to_string());
     }
-    let (initiator, from_external_space) = normalize_initiator(requester);
     let mut overlays = Vec::new();
     for (idx, display) in displays.iter().enumerate() {
         // The stderr line lands in the app log, so a person testing with a
@@ -118,11 +137,15 @@ pub(crate) fn start_region_capture(app: &AppHandle, requester: &str) -> Result<(
         });
     }
     if overlays.is_empty() {
+        if stay_on_island {
+            end_stay(app);
+        }
         return Err("could not capture any display".to_string());
     }
     *REGION.lock().unwrap_or_else(|err| err.into_inner()) = Some(RegionSession {
         initiator,
         from_external_space,
+        stay_on_island,
         overlays,
     });
     crate::island::on_capture_state_changed(app);
@@ -162,12 +185,19 @@ pub async fn complete_region_capture_command(
         .find(|overlay| overlay.label == window.label())
         .map(|overlay| overlay.display)
     else {
+        let stay = session.stay_on_island;
         close_overlays(&app, Some(session));
         CAPTURING.store(false, Ordering::SeqCst);
         crate::island::on_capture_state_changed(&app);
+        if stay {
+            end_stay(&app);
+        }
         return Err("unknown screenshot overlay".to_string());
     };
     let initiator = session.initiator.clone();
+    let from_external = session.from_external_space;
+    let stay = session.stay_on_island;
+    eprintln!("[screenshot] deliver stay={stay} external={from_external}");
     // Drop the dim layer first so it never lands in the shot, then grab the
     // live screen — the space the person landed on is the one they picked on.
     hide_overlays(&app, &session.overlays);
@@ -186,11 +216,189 @@ pub async fn complete_region_capture_command(
         Err(message) => eprintln!("[screenshot] capture panicked: {message}"),
     }
     match captured {
+        Ok(Ok(path)) if stay => crate::island::present_island_shot(&app, path),
         Ok(Ok(path)) => deliver_captured_shot(&app, &initiator, path),
+        Ok(Err(message)) if stay => crate::island::present_island_shot_failure(&app, message),
         Ok(Err(message)) => deliver_failed_shot(&app, &initiator, message),
+        Err(message) if stay => crate::island::present_island_shot_failure(&app, message),
         Err(message) => deliver_failed_shot(&app, &initiator, message),
     }
+    if stay {
+        end_stay(&app);
+    }
     Ok(())
+}
+
+/// Mac keeps a shot on the top bar when the chat window is not the screen the
+/// person is looking at. Windows always brings the conversation forward.
+fn stay_with_island(app: &AppHandle, from_external: bool) -> bool {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, from_external);
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !crate::island::island_bar_enabled(app) {
+            return false;
+        }
+        shot_stays_on_island(true, from_external, ask_on_active_space(app))
+    }
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn shot_stays_on_island(macos: bool, from_external: bool, ask_on_active_space: bool) -> bool {
+    macos && (from_external || !ask_on_active_space)
+}
+
+#[cfg(target_os = "macos")]
+fn ask_on_active_space(app: &AppHandle) -> bool {
+    if objc2::MainThreadMarker::new().is_some() {
+        return ask_on_active_space_main(app);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        let _ = tx.send(ask_on_active_space_main(&app));
+    });
+    rx.recv_timeout(Duration::from_millis(400)).unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn ask_on_active_space_main(app: &AppHandle) -> bool {
+    use objc2_app_kit::NSWindow;
+
+    let Some(window) = app.get_webview_window("ask") else {
+        return false;
+    };
+    if window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(false) {
+        return false;
+    }
+    let Ok(ptr) = window.ns_window() else {
+        return false;
+    };
+    if ptr.is_null() {
+        return false;
+    }
+    let ns: &NSWindow = unsafe { &*ptr.cast() };
+    ns.isOnActiveSpace()
+}
+
+/// Stop the conversation windows from becoming key, and stop the app from
+/// activating, before the top bar is ordered out. Ordering out the key bar
+/// otherwise makes macOS activate whichever window is on the other desktop.
+#[cfg(target_os = "macos")]
+fn begin_stay(app: &AppHandle) {
+    STAY_GEN.fetch_add(1, Ordering::SeqCst);
+    crate::macos_activation::set_suppressed(true);
+    let app = app.clone();
+    run_main_sync(&app.clone(), move || {
+        set_regular_windows_focusable(&app, false);
+        deactivate_app();
+    });
+    eprintln!("[screenshot] stay on this desktop");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn begin_stay(app: &AppHandle) {
+    let _ = app;
+}
+
+/// Give the conversation windows their keyboard back once the desktop has
+/// settled. A restore that belongs to an older capture does nothing.
+#[cfg(target_os = "macos")]
+fn end_stay(app: &AppHandle) {
+    let gen = STAY_GEN.load(Ordering::SeqCst);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(800));
+        if STAY_GEN.load(Ordering::SeqCst) != gen || is_region_capture_open() {
+            return;
+        }
+        let app = app.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = app.clone().run_on_main_thread(move || {
+            if STAY_GEN.load(Ordering::SeqCst) == gen && !is_region_capture_open() {
+                set_regular_windows_focusable(&app, true);
+                crate::macos_activation::set_suppressed(false);
+            }
+            let _ = tx.send(());
+        });
+        let _ = rx.recv_timeout(Duration::from_millis(500));
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn end_stay(app: &AppHandle) {
+    let _ = app;
+}
+
+/// A capture that should come back to the conversation cancels any pending
+/// "stay here" restore and lets activation through again.
+#[cfg(target_os = "macos")]
+fn release_stay(app: &AppHandle) {
+    STAY_GEN.fetch_add(1, Ordering::SeqCst);
+    crate::macos_activation::set_suppressed(false);
+    let app = app.clone();
+    run_main_sync(&app.clone(), move || {
+        set_regular_windows_focusable(&app, true)
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn release_stay(app: &AppHandle) {
+    let _ = app;
+}
+
+#[cfg(target_os = "macos")]
+fn set_regular_windows_focusable(app: &AppHandle, focusable: bool) {
+    use objc2_app_kit::NSWindow;
+
+    let windows: Vec<_> = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(label, _)| {
+            label != "island" && !label.starts_with("island-") && !label.starts_with("screenshot-")
+        })
+        .map(|(_, window)| window)
+        .collect();
+    for window in &windows {
+        let _ = window.set_focusable(focusable);
+    }
+    if focusable {
+        return;
+    }
+    // Resign only after every conversation window has refused the keyboard.
+    // Resigning the first one early would hand the key to the next one, and
+    // that handoff is what changes desktops.
+    for window in &windows {
+        let Ok(ptr) = window.ns_window() else {
+            continue;
+        };
+        if ptr.is_null() {
+            continue;
+        }
+        let ns: &NSWindow = unsafe { &*ptr.cast() };
+        if ns.isKeyWindow() {
+            ns.resignKeyWindow();
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn deactivate_app() {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+
+    let Some(cls) = AnyClass::get(c"NSApplication") else {
+        return;
+    };
+    unsafe {
+        let app: *mut AnyObject = msg_send![cls, sharedApplication];
+        if !app.is_null() {
+            let _: () = msg_send![app, deactivate];
+        }
+    }
 }
 
 fn deliver_captured_shot(app: &AppHandle, initiator: &str, path: String) {
@@ -231,8 +439,12 @@ pub fn cancel_region_capture_command(app: AppHandle) -> Result<(), String> {
         eprintln!("[screenshot] cancelled");
         let initiator = session.initiator.clone();
         let from_external_space = session.from_external_space;
+        let stay = session.stay_on_island;
         close_overlays(&app, Some(session));
         crate::island::on_capture_state_changed(&app);
+        if stay {
+            end_stay(&app);
+        }
         let _ = app.emit_to(initiator.clone(), "screenshot-cancelled", ());
         // If they started from the island/tray or swiped to another Space on
         // macOS, Esc should leave them on the Space they are looking at rather
@@ -652,6 +864,9 @@ fn teardown_picker_panels_sync(app: &AppHandle, overlays: &[Overlay]) {
                             host.setContentView(Some(&view));
                             panel_win.setContentView(Some(&NSView::new(mtm)));
                         }
+                        // Putting the view back can order the host forward on the
+                        // Space where the chat lives. Keep it out.
+                        host.orderOut(None);
                     }
                 }
             }
@@ -672,5 +887,14 @@ mod tests {
         assert_eq!(normalize_initiator("island"), ("ask".to_string(), true));
         assert_eq!(normalize_initiator("island-1"), ("ask".to_string(), true));
         assert_eq!(normalize_initiator("tray"), ("ask".to_string(), true));
+    }
+
+    #[test]
+    fn mac_shot_stays_on_the_island_unless_chat_is_already_on_this_space() {
+        assert!(super::shot_stays_on_island(true, true, true));
+        assert!(super::shot_stays_on_island(true, true, false));
+        assert!(super::shot_stays_on_island(true, false, false));
+        assert!(!super::shot_stays_on_island(true, false, true));
+        assert!(!super::shot_stays_on_island(false, true, false));
     }
 }

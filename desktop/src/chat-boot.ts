@@ -84,6 +84,7 @@ import {
 } from "./chat";
 
 import { emit, listen } from "@tauri-apps/api/event";
+import { fileNameFromPath, isImagePath } from "./chat/copy-ui";
 import { bindLocaleSync } from "./locale-sync";
 import { startIslandPublisher } from "./island/publish";
 import {
@@ -1297,7 +1298,7 @@ function bootChatTail(): void {
     if (!requestId || !text) return;
     void applyChannelAnswer(requestId, text).catch(() => {});
   });
-  void listen<{ sessionId?: string; text?: string }>("island-send-text", (event) => {
+  void listen<{ sessionId?: string; text?: string; paths?: string[] }>("island-send-text", (event) => {
     const text = event.payload?.text?.trim() ?? "";
     const sessionId = event.payload?.sessionId || chatState.store?.activeId || "";
     const report = (status: "sent" | "queued" | "busy" | "failed") => {
@@ -1307,7 +1308,16 @@ function bootChatTail(): void {
       report("failed");
       return;
     }
-    const draft = { id: crypto.randomUUID(), sessionId, text, attachments: [], mentions: [] };
+    const attachments = (event.payload?.paths ?? [])
+      .map((path) => path.trim())
+      .filter(Boolean)
+      .map((path) => ({
+        id: crypto.randomUUID(),
+        path,
+        name: fileNameFromPath(path),
+        kind: isImagePath(path) ? ("image" as const) : ("file" as const),
+      }));
+    const draft = { id: crypto.randomUUID(), sessionId, text, attachments, mentions: [] };
     if (isChatRunning(sessionId)) {
       void chatState.send.sendAsk({ draft });
       report("queued");

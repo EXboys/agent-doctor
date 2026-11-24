@@ -245,6 +245,11 @@ export type IslandSessionSource = {
   plan?: PlanStep[];
 };
 
+export type IslandTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type IslandRow = {
   id: string;
   agent: string;
@@ -253,6 +258,7 @@ export type IslandRow = {
   preview: string;
   sent: string;
   spoken: string;
+  turns?: IslandTurn[];
   at: number;
   current: boolean;
   needsYou: boolean;
@@ -289,6 +295,41 @@ function leadSentence(text: string): string {
 
 const QUIET_MS = 7 * 24 * 60 * 60 * 1000;
 const ROW_CAP = 8;
+const TURN_CAP = 16;
+const TURN_CHARS_CAP = 6000;
+
+function clipTurnContent(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > TURN_CHARS_CAP ? `${trimmed.slice(0, TURN_CHARS_CAP)}…` : trimmed;
+}
+
+function recentTurns(
+  messages: { role: string; content: string }[],
+  exchange: { sent: string; spoken: string },
+  live: { sent: string; spoken: string },
+  current: boolean,
+): IslandTurn[] {
+  const turns: IslandTurn[] = [];
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const content = clipTurnContent(m.content);
+    if (!content) continue;
+    turns.push({ role: m.role, content });
+  }
+  const sliced = turns.slice(-TURN_CAP);
+  if (!current) return sliced;
+  const liveSent = clipTurnContent(live.sent);
+  const liveSpoken = clipTurnContent(live.spoken);
+  if (liveSent && liveSent !== clipTurnContent(exchange.sent)) {
+    sliced.push({ role: "user", content: liveSent });
+    if (liveSpoken) sliced.push({ role: "assistant", content: liveSpoken });
+  } else if (liveSpoken) {
+    const last = sliced[sliced.length - 1];
+    if (last?.role === "assistant") last.content = liveSpoken;
+    else sliced.push({ role: "assistant", content: liveSpoken });
+  }
+  return sliced.slice(-TURN_CAP);
+}
 
 /** Recent conversations for the expanded island. Live text wins for the open one. */
 export function buildIslandRows(
@@ -304,7 +345,8 @@ export function buildIslandRows(
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, ROW_CAP)
     .map((session) => {
-      const exchange = latestExchange(session.messages ?? []);
+      const messages = session.messages ?? [];
+      const exchange = latestExchange(messages);
       const current = session.id === activeId;
       let sent = exchange.sent;
       let spoken = exchange.spoken;
@@ -314,6 +356,7 @@ export function buildIslandRows(
       } else if (current && live.spoken) {
         spoken = live.spoken;
       }
+      const turns = recentTurns(messages, exchange, live, current);
       const agent = agentOf(session.runtime);
       const needsYou = Boolean(needsYouId) && session.id === needsYouId;
       const working = !needsYou && Boolean(workingId) && session.id === workingId;
@@ -326,6 +369,7 @@ export function buildIslandRows(
         preview: clipPreview(done) || previewLine(session.title, sent),
         sent,
         spoken,
+        turns: turns.length ? turns : undefined,
         at: session.updatedAt,
         current,
         needsYou,

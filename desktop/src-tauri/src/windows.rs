@@ -342,6 +342,11 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     }
     let _ = window.unminimize();
     let _ = window.show();
+    #[cfg(target_os = "macos")]
+    crate::macos_activation::allow(|| {
+        let _ = window.set_focus();
+    });
+    #[cfg(not(target_os = "macos"))]
     let _ = window.set_focus();
     // Showing the window can put the system title back on the transparent bar.
     apply_content_window_chrome(&window);
@@ -363,6 +368,11 @@ pub(crate) fn focus_named_window(app: &AppHandle, label: &str) {
     };
     let _ = window.unminimize();
     let _ = window.show();
+    #[cfg(target_os = "macos")]
+    crate::macos_activation::allow(|| {
+        let _ = window.set_focus();
+    });
+    #[cfg(not(target_os = "macos"))]
     let _ = window.set_focus();
     #[cfg(target_os = "windows")]
     {
@@ -373,20 +383,7 @@ pub(crate) fn focus_named_window(app: &AppHandle, label: &str) {
 
 fn activate_current_app() {
     #[cfg(target_os = "macos")]
-    {
-        use objc2::msg_send;
-        use objc2::runtime::{AnyClass, AnyObject};
-
-        let Some(cls) = AnyClass::get(c"NSApplication") else {
-            return;
-        };
-        unsafe {
-            let app: *mut AnyObject = msg_send![cls, sharedApplication];
-            if !app.is_null() {
-                let _: () = msg_send![app, activateIgnoringOtherApps: true];
-            }
-        }
-    }
+    crate::macos_activation::activate_ignoring_other_apps();
 }
 
 pub(crate) fn attach_main_window_close_behavior(window: &tauri::WebviewWindow) {

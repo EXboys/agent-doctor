@@ -1521,7 +1521,9 @@ fn find_workbuddy_log_auth_url(logs_dir: &Path, since: SystemTime) -> Option<Str
 
 fn spawn_zcode_login(launch: &crate::adapters::ZcodeHeadless, family: &str) -> Result<()> {
     let mut cmd = crate::adapters::zcode_headless_command(launch);
-    cmd.arg("login")
+    crate::session_env::scrub_subscription_gateway_env(&mut cmd);
+    cmd.current_dir(std::env::temp_dir())
+        .arg("login")
         .arg(family)
         .arg("--no-browser")
         .stdin(Stdio::null())
@@ -1789,7 +1791,7 @@ fn agy_keyring_present() -> bool {
 fn agy_keyring_present() -> bool {
     #[cfg(target_os = "linux")]
     {
-        return std::process::Command::new("secret-tool") // raw-spawn-ok
+        std::process::Command::new("secret-tool") // raw-spawn-ok
             .args([
                 "lookup",
                 "service",
@@ -1801,16 +1803,18 @@ fn agy_keyring_present() -> bool {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .is_ok_and(|status| status.success());
+            .is_ok_and(|status| status.success())
     }
     #[cfg(target_os = "windows")]
     {
-        let Ok(output) = std::process::Command::new("cmdkey").arg("/list").output() else {
-            // raw-spawn-ok
+        let Ok(output) = std::process::Command::new("cmdkey") // raw-spawn-ok
+            .arg("/list")
+            .output()
+        else {
             return false;
         };
         let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-        return text.contains(AGY_KEYRING_SERVICE) && text.contains(AGY_KEYRING_ACCOUNT);
+        text.contains(AGY_KEYRING_SERVICE) && text.contains(AGY_KEYRING_ACCOUNT)
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     false

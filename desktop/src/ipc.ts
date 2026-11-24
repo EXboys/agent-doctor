@@ -1529,8 +1529,32 @@ export function islandOpenSession(sessionId: string): Promise<void> {
   return invoke("island_open_session_command", { sessionId });
 }
 
-export function islandSendText(sessionId: string, text: string): Promise<void> {
-  return invoke("island_send_text_command", { sessionId, text });
+export function islandSendText(
+  sessionId: string,
+  text: string,
+  paths?: string[],
+): Promise<void> {
+  return invoke("island_send_text_command", {
+    sessionId,
+    text,
+    ...(paths && paths.length > 0 ? { paths } : {}),
+  });
+}
+
+export function islandClearShot(): Promise<void> {
+  return invoke("island_clear_shot_command");
+}
+
+export function currentIslandShot(): Promise<string[]> {
+  return invoke("current_island_shot_command");
+}
+
+export function islandShotPreview(path?: string): Promise<string> {
+  return invoke("island_shot_preview_command", path ? { path } : {});
+}
+
+export function islandForgetShot(path: string): Promise<void> {
+  return invoke("island_forget_shot_command", { path });
 }
 
 export function islandSetReading(reading: boolean): Promise<void> {

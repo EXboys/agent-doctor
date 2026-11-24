@@ -41,6 +41,8 @@ mod island;
 mod link_prompt;
 mod link_remote;
 mod link_session;
+#[cfg(target_os = "macos")]
+mod macos_activation;
 mod prompt_log;
 mod speech;
 mod state;
@@ -52,12 +54,13 @@ pub(crate) use tray::{rebuild_tray_menu, remember_tray_health, update_tray_toolt
 
 use commands::*;
 use island::{
-    current_island_view_command, island_claim_keyboard_command, island_enabled_command,
+    current_island_shot_command, current_island_view_command, island_claim_keyboard_command,
+    island_clear_shot_command, island_enabled_command, island_forget_shot_command,
     island_hide_when_idle_command, island_open_session_command, island_pin_command,
     island_place_chip_command, island_restore_command, island_send_text_command,
     island_set_content_height_command, island_set_enabled_command,
     island_set_hide_when_idle_command, island_set_hover_command, island_set_reading_command,
-    publish_island_snapshot_command, IslandHost,
+    island_shot_preview_command, publish_island_snapshot_command, IslandHost,
 };
 use link_remote::{
     cancel_linked_prompt, resolve_linked_permission, run_linked_prompt, split_linked_workspace,
@@ -919,6 +922,8 @@ pub fn run() {
     // odd filenames list used to abort the process on the main thread.
     #[cfg(target_os = "macos")]
     drag_pasteboard::keep_file_drags_from_aborting();
+    #[cfg(target_os = "macos")]
+    macos_activation::install();
     agent_doctor_core::quiet_system_error_dialogs();
     agent_doctor_mcp::register_browser_mcp_wire_backend();
     agent_doctor_repair::register();
@@ -1216,6 +1221,10 @@ pub fn run() {
             island_restore_command,
             island_pin_command,
             island_open_session_command,
+            current_island_shot_command,
+            island_shot_preview_command,
+            island_clear_shot_command,
+            island_forget_shot_command,
             island_send_text_command,
             island_claim_keyboard_command,
             island_set_reading_command,

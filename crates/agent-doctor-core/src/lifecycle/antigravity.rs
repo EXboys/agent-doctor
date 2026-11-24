@@ -101,13 +101,48 @@ mod tests {
     #[test]
     fn install_uses_the_official_script() {
         let cmd = antigravity_install_shell_command();
-        assert!(cmd.contains("antigravity.google/cli/install."));
+        let script = install_script_text(&cmd);
+        assert!(
+            script.contains("https://antigravity.google/cli/install."),
+            "{script}"
+        );
         #[cfg(not(windows))]
         {
-            assert!(cmd.contains("mktemp"));
-            assert!(cmd.contains("-o \"$tmp\""));
-            assert!(!cmd.contains("| bash"));
+            assert!(script.contains("mktemp"));
+            assert!(script.contains("-o \"$tmp\""));
+            assert!(!script.contains("| bash"));
         }
+        #[cfg(windows)]
+        {
+            assert!(script.contains("install.ps1"));
+            assert!(script.contains("Invoke-WebRequest"));
+        }
+    }
+
+    fn install_script_text(command: &str) -> String {
+        #[cfg(windows)]
+        {
+            decoded_windows_script(command)
+        }
+        #[cfg(not(windows))]
+        {
+            command.to_string()
+        }
+    }
+
+    /// Windows wraps the installer in `-EncodedCommand`, so the URL is not plaintext.
+    #[cfg(windows)]
+    fn decoded_windows_script(command: &str) -> String {
+        use base64::Engine as _;
+        let encoded = command.rsplit(' ').next().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        String::from_utf16(&units).unwrap()
     }
 
     #[test]

@@ -1,4 +1,6 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import "../platform";
+import { setAgentBrandIcon } from "../agent-brand";
 import { fitTextarea } from "../fit-textarea";
 import { applyOpenChatId, parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
@@ -18,6 +20,10 @@ import {
   islandHideWhenIdle,
   islandPlaceChip,
   islandRestore,
+  currentIslandShot,
+  islandClearShot,
+  islandForgetShot,
+  islandShotPreview,
   islandSetReading,
   resolvePermissionSession,
   startRegionCapture,
@@ -36,7 +42,29 @@ const scrollHintEl = document.querySelector<HTMLElement>("#island-scroll-hint");
 const actionsEl = document.querySelector<HTMLElement>("#island-actions");
 const errorEl = document.querySelector<HTMLElement>("#island-error");
 const hideIdleEl = document.querySelector<HTMLInputElement>("#island-hide");
+const backEl = document.querySelector<HTMLButtonElement>("#island-back");
 const screenshotEl = document.querySelector<HTMLButtonElement>("#island-screenshot");
+const shotCardEl = document.querySelector<HTMLElement>("#island-shot-card");
+
+type ShotStatus = "" | "sent" | "queued" | "busy" | "failed";
+type ShotCardState = {
+  paths: string[];
+  phase: "compose" | "sent";
+  text: string;
+  shown: string;
+  sessionId: string;
+  status: ShotStatus;
+};
+const SHOT_CAP = 4;
+let shot: ShotCardState | null = null;
+let shotError = "";
+let shotSending = false;
+
+const SHOT_CHIPS = [
+  { label: "chat.screenshotChipDiagnose", prompt: "chat.screenshotChipDiagnosePrompt" },
+  { label: "chat.screenshotChipExtract", prompt: "chat.screenshotChipExtractPrompt" },
+  { label: "chat.screenshotChipExplain", prompt: "chat.screenshotChipExplainPrompt" },
+] as const;
 
 let hoverTimer = 0;
 let pointerInside = false;
@@ -238,6 +266,40 @@ function fitReplyField(field: HTMLTextAreaElement): void {
   field.closest(".island-compose")?.classList.toggle("is-multiline", next > 40);
 }
 
+function sendArrowIcon(): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M8 12.8V3.6M8 3.6 4.3 7.2M8 3.6l3.7 3.6");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.85");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
+}
+
+function openExternalIcon(): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "12");
+  svg.setAttribute("height", "12");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M4.5 11.5 11.5 4.5M6.2 4.5h5.3v5.3");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.65");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
+}
+
 function appendReplyField(
   parent: HTMLElement,
   placeholder: string,
@@ -269,6 +331,7 @@ function appendReplyField(
   field.addEventListener("input", () => {
     if (field instanceof HTMLTextAreaElement) fitReplyField(field);
     compose.classList.toggle("is-ready", field.value.trim().length > 0);
+    reportHeight();
   });
   const send = () => {
     const text = field.value.trim();
@@ -291,7 +354,10 @@ function appendReplyField(
   const button = document.createElement("button");
   button.type = "button";
   button.className = "island-send";
-  button.textContent = t("island.send");
+  const sendLabel = t("island.send");
+  button.setAttribute("aria-label", sendLabel);
+  button.title = sendLabel;
+  button.append(sendArrowIcon());
   button.addEventListener("click", send);
   compose.append(field, button);
   parent.append(compose);
@@ -618,17 +684,53 @@ function latestExchange(row: IslandFeedRow): { you: string; reply: string } {
   return { you, reply };
 }
 
+function conversationTurns(row: IslandFeedRow): { role: "user" | "assistant"; content: string }[] {
+  if (row.turns && row.turns.length > 0) return row.turns;
+  const fromStore = messagesFor(row.id).filter(
+    (m): m is { role: "user" | "assistant"; content: string } =>
+      m.role === "user" || m.role === "assistant",
+  );
+  if (fromStore.length > 0) return fromStore;
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  if (row.sent.trim()) out.push({ role: "user", content: row.sent.trim() });
+  if (row.spoken.trim()) out.push({ role: "assistant", content: row.spoken.trim() });
+  return out;
+}
+
 function renderConversation(row: IslandFeedRow): HTMLElement {
   const body = document.createElement("div");
   body.className = "island-row-body";
-  const { you, reply } = latestExchange(row);
-  if (you) {
-    const said = document.createElement("div");
-    said.className = "island-msg-you";
-    said.textContent = you;
-    body.append(said);
+  const focused = row.id === openRowId;
+  const turns = focused ? conversationTurns(row) : [];
+  if (!focused) {
+    const { you, reply } = latestExchange(row);
+    if (you) {
+      const said = document.createElement("div");
+      said.className = "island-msg-you";
+      said.dataset.role = t("island.you");
+      said.textContent = you;
+      body.append(said);
+    }
+    if (reply) appendReply(body, row.id, reply, false);
+    return body;
   }
-  if (reply) appendReply(body, row.id, reply);
+  turns.forEach((turn, idx) => {
+    if (turn.role === "user") {
+      const said = document.createElement("div");
+      said.className = "island-msg-you";
+      said.dataset.role = t("island.you");
+      said.textContent = turn.content;
+      body.append(said);
+    } else {
+      appendReply(body, `${row.id}:${idx}`, turn.content, true);
+    }
+  });
+  if (row.working && turns[turns.length - 1]?.role === "user") {
+    const waiting = document.createElement("p");
+    waiting.className = "island-shot-waiting";
+    waiting.textContent = t("island.stateWorking");
+    body.append(waiting);
+  }
   return body;
 }
 
@@ -641,8 +743,9 @@ function replyNeedsFold(reply: string): boolean {
   return lines.length > 3 || plain.length > 80;
 }
 
-function appendReply(body: HTMLElement, rowId: string, reply: string): void {
-  const fold = replyNeedsFold(reply);
+function appendReply(body: HTMLElement, rowId: string, reply: string, unfolded = false): void {
+  const focused = unfolded || (openRowId !== "" && openRowId === rowId);
+  const fold = !focused && replyNeedsFold(reply);
   const open = fold && expandedReplyId === rowId;
   if (fold && !open) {
     const button = document.createElement("button");
@@ -693,11 +796,30 @@ function toggleRow(id: string): void {
   const closing = openRowId === id;
   if (closing || openRowId !== id) expandedReplyId = "";
   openRowId = closing ? "" : id;
+  reportedHeight = 0;
   void islandSetReading(openRowId !== "").catch(() => {});
   feedSig = "";
   if (errorEl) errorEl.hidden = true;
   if (lastView) render(lastView);
   else renderFeed(lastRows);
+}
+
+function leaveFocus(): void {
+  if (!openRowId) return;
+  openRowId = "";
+  expandedReplyId = "";
+  snappedRowId = "";
+  feedSig = "";
+  reportedHeight = 0;
+  void islandSetReading(false).catch(() => {});
+  if (lastView) render(lastView);
+  else renderFeed(lastRows);
+}
+
+function applyFocusChrome(): void {
+  const on = Boolean(openRowId) && !shot;
+  root?.classList.toggle("is-focus", on);
+  if (backEl) backEl.hidden = !on;
 }
 
 function askCopy(pending: IslandPending): { kicker: string; title: string } {
@@ -795,25 +917,31 @@ function restoreCaret(
   }
 }
 
+function paintIslandAvatar(runtime: string, fallback: string): HTMLElement {
+  const avatar = document.createElement("span");
+  avatar.className = "island-avatar";
+  avatar.dataset.runtime = runtime;
+  setAgentBrandIcon(avatar, runtime);
+  if (!avatar.querySelector(".agent-brand-img")) {
+    avatar.textContent = (fallback.trim().charAt(0) || "?").toUpperCase();
+  }
+  return avatar;
+}
+
 function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPending): void {
   item.classList.add("is-ask");
   const head = document.createElement("div");
   head.className = "island-ask-head";
-  const avatar = document.createElement("span");
-  avatar.className = "island-avatar";
-  avatar.dataset.runtime = row.runtime;
-  avatar.textContent = row.agent.slice(0, 1).toUpperCase();
+  const avatar = paintIslandAvatar(row.runtime, row.agent);
+  avatar.setAttribute("aria-label", row.agent);
   const copy = document.createElement("span");
   copy.className = "island-copy";
   const headline = document.createElement("span");
   headline.className = "island-headline";
-  const name = document.createElement("span");
-  name.className = "island-agent";
-  name.textContent = row.agent;
   const title = document.createElement("span");
   title.className = "island-preview";
   title.textContent = row.preview || row.agent;
-  headline.append(name, title);
+  headline.append(title);
   const sub = document.createElement("span");
   sub.className = "island-sub";
   sub.textContent = t("island.waitingFor", { agent: row.agent });
@@ -897,7 +1025,8 @@ function renderFeed(rows: IslandFeedRow[]): void {
   const bodyScroll = oldBody?.scrollTop ?? 0;
   const scroll = detailEl.scrollTop;
   detailEl.replaceChildren();
-  for (const row of shown) {
+  const visible = openRowId ? shown.filter((row) => row.id === openRowId) : shown;
+  for (const row of visible) {
     const item = document.createElement("article");
     item.className = "island-row";
     if (row.needsYou) item.classList.add("is-needs-you");
@@ -912,20 +1041,15 @@ function renderFeed(rows: IslandFeedRow[]): void {
       if (body) body.scrollTop = stick ? body.scrollHeight : bodyScroll;
       continue;
     }
-    const head = document.createElement("button");
-    head.type = "button";
+    const head = document.createElement(openRowId ? "div" : "button");
+    if (head instanceof HTMLButtonElement) head.type = "button";
     head.className = "island-row-head";
-    const avatar = document.createElement("span");
-    avatar.className = "island-avatar";
-    avatar.dataset.runtime = row.runtime;
-    avatar.textContent = row.agent.slice(0, 1).toUpperCase();
+    const avatar = paintIslandAvatar(row.runtime, row.agent);
+    avatar.setAttribute("aria-label", row.agent);
     const copy = document.createElement("span");
     copy.className = "island-copy";
     const headline = document.createElement("span");
     headline.className = "island-headline";
-    const name = document.createElement("span");
-    name.className = "island-agent";
-    name.textContent = row.agent;
     const open = row.id === openRowId;
     if (!open) {
       const title = document.createElement("span");
@@ -947,23 +1071,39 @@ function renderFeed(rows: IslandFeedRow[]): void {
         copy.append(reply);
       }
     }
-    headline.prepend(name);
     copy.prepend(headline);
     appendPlanProgress(copy, row);
-    const meta = document.createElement("span");
-    meta.className = "island-meta";
     const when = document.createElement("span");
     when.className = "island-when";
     when.textContent = ago(row.at);
-    const badge = document.createElement("span");
-    badge.className = "island-badge";
-    badge.dataset.runtime = row.runtime;
-    badge.textContent = row.badge;
-    meta.append(when, badge);
-    appendState(meta, row);
+    const meta = document.createElement("span");
+    meta.className = "island-meta";
+    if (open) {
+      headline.append(when);
+      appendState(meta, row);
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "island-more";
+      const moreLabel = document.createElement("span");
+      moreLabel.textContent = t("island.more");
+      more.append(moreLabel, openExternalIcon());
+      more.addEventListener("click", () => {
+        openRowId = "";
+        void islandSetReading(false).catch(() => {});
+        void islandOpenSession(row.id).catch(() => {});
+      });
+      meta.append(more);
+    } else {
+      const badge = document.createElement("span");
+      badge.className = "island-badge";
+      badge.dataset.runtime = row.runtime;
+      badge.textContent = row.badge;
+      meta.append(when, badge);
+      appendState(meta, row);
+    }
     head.append(avatar, copy, meta);
     head.setAttribute("aria-expanded", String(open));
-    head.addEventListener("click", () => toggleRow(row.id));
+    if (head instanceof HTMLButtonElement) head.addEventListener("click", () => toggleRow(row.id));
     item.append(head);
     if (row.id === openRowId) {
       const panel = document.createElement("div");
@@ -972,16 +1112,6 @@ function renderFeed(rows: IslandFeedRow[]): void {
       const body = renderConversation(row);
       panel.append(body);
       appendPlanList(panel, row);
-      const more = document.createElement("button");
-      more.type = "button";
-      more.className = "island-more";
-      more.textContent = t("island.more");
-      more.addEventListener("click", () => {
-        openRowId = "";
-        void islandSetReading(false).catch(() => {});
-        void islandOpenSession(row.id).catch(() => {});
-      });
-      panel.append(more);
       item.append(panel);
       body.scrollTop = stick ? body.scrollHeight : bodyScroll;
     } else {
@@ -1024,11 +1154,6 @@ function placeActions(view: IslandView): void {
   if (slot) {
     slot.append(actionsEl);
     actionsEl.classList.add("is-inline");
-  } else if (host) {
-    const more = host.querySelector(".island-more");
-    if (more) more.before(actionsEl);
-    else host.append(actionsEl);
-    actionsEl.classList.add("is-inline");
   } else if (errorEl) {
     errorEl.before(actionsEl);
     actionsEl.classList.remove("is-inline");
@@ -1043,8 +1168,45 @@ function marginsOf(el: Element): number {
   return (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
 }
 
+/** Natural height of an open conversation row, before flex clamps or stretches its scroll body. */
+function openRowContentHeight(row: HTMLElement): number {
+  const style = getComputedStyle(row);
+  let height =
+    (parseFloat(style.paddingTop) || 0) +
+    (parseFloat(style.paddingBottom) || 0) +
+    (parseFloat(style.borderTopWidth) || 0) +
+    (parseFloat(style.borderBottomWidth) || 0);
+  for (const part of row.children) {
+    if (!(part instanceof HTMLElement) || part.getClientRects().length === 0) continue;
+    if (part.classList.contains("island-row-panel")) {
+      const panelStyle = getComputedStyle(part);
+      let panelHeight =
+        (parseFloat(panelStyle.paddingTop) || 0) +
+        (parseFloat(panelStyle.paddingBottom) || 0) +
+        (parseFloat(panelStyle.borderTopWidth) || 0) +
+        (parseFloat(panelStyle.borderBottomWidth) || 0);
+      let visible = 0;
+      for (const item of part.children) {
+        if (!(item instanceof HTMLElement) || item.getClientRects().length === 0) continue;
+        const inner = item.classList.contains("island-row-body")
+          ? blockContentHeight(item)
+          : item.offsetHeight;
+        panelHeight += marginsOf(item) + inner;
+        visible += 1;
+      }
+      const gap = parseFloat(panelStyle.rowGap) || parseFloat(panelStyle.gap) || 0;
+      if (visible > 1 && gap > 0) panelHeight += gap * (visible - 1);
+      height += marginsOf(part) + panelHeight;
+    } else {
+      height += marginsOf(part) + part.offsetHeight;
+    }
+  }
+  return height;
+}
+
 /** Rows, not the stretched frame. A tall window must not keep the next measure tall. */
 function listContentHeight(list: HTMLElement): number {
+  if (!root?.classList.contains("is-focus")) return blockContentHeight(list);
   const style = getComputedStyle(list);
   let height =
     (parseFloat(style.paddingTop) || 0) +
@@ -1053,8 +1215,31 @@ function listContentHeight(list: HTMLElement): number {
     (parseFloat(style.borderBottomWidth) || 0);
   for (const child of list.children) {
     if (!(child instanceof HTMLElement) || child.getClientRects().length === 0) continue;
-    height += marginsOf(child) + child.offsetHeight;
+    const rowHeight =
+      child.classList.contains("island-row") && child.classList.contains("is-open")
+        ? openRowContentHeight(child)
+        : child.offsetHeight;
+    height += marginsOf(child) + rowHeight;
   }
+  return height;
+}
+
+/** Content height, including the gap between rows. A shrunk card must not hide the send button. */
+function blockContentHeight(block: HTMLElement): number {
+  const style = getComputedStyle(block);
+  let height =
+    (parseFloat(style.paddingTop) || 0) +
+    (parseFloat(style.paddingBottom) || 0) +
+    (parseFloat(style.borderTopWidth) || 0) +
+    (parseFloat(style.borderBottomWidth) || 0);
+  let visible = 0;
+  for (const child of block.children) {
+    if (!(child instanceof HTMLElement) || child.getClientRects().length === 0) continue;
+    height += marginsOf(child) + child.offsetHeight;
+    visible += 1;
+  }
+  const gap = parseFloat(style.rowGap) || parseFloat(style.gap) || 0;
+  if (visible > 1 && gap > 0) height += gap * (visible - 1);
   return height;
 }
 
@@ -1076,9 +1261,13 @@ function reportHeight(): void {
     const list = child.classList.contains("island-read-frame")
       ? child.querySelector<HTMLElement>(".island-read")
       : null;
-    height +=
-      marginsOf(child) +
-      (list && !list.hidden ? listContentHeight(list) : child.offsetHeight);
+    const measured =
+      list && !list.hidden
+        ? listContentHeight(list)
+        : child.id === "island-shot-card"
+          ? blockContentHeight(child)
+          : child.offsetHeight;
+    height += marginsOf(child) + measured;
   }
   height = Math.ceil(height);
   if (Math.abs(height - reportedHeight) < 2) return;
@@ -1125,12 +1314,34 @@ function render(view: IslandView): void {
   } else if (scrollHintEl) {
     scrollHintEl.hidden = true;
   }
-  if (!view.pending && errorEl) errorEl.hidden = true;
+  if (shotError && errorEl) {
+    errorEl.hidden = false;
+    errorEl.classList.remove("is-info");
+    errorEl.textContent = shotError;
+  } else if (!view.pending && errorEl) {
+    errorEl.hidden = true;
+  }
+  if (shot && !toast) {
+    if (shot.phase === "compose" && !view.attention) {
+      titleEl.textContent = t(shot.paths.length > 1 ? "island.shotPendingMany" : "island.shotPending");
+    } else if (shot.phase === "sent" && !shotReplyText()) {
+      titleEl.textContent =
+        shot.status === "queued"
+          ? t("island.shotQueued")
+          : t(shot.paths.length > 1 ? "island.shotLookingMany" : "island.shotLooking");
+    }
+  }
+  renderShotCard();
+  applyFocusChrome();
 }
 
 /** Shown only while more conversations sit below the visible edge. */
 function syncScrollHint(): void {
   if (!scrollHintEl || !detailEl) return;
+  if (root?.classList.contains("is-shot") || root?.classList.contains("is-focus")) {
+    scrollHintEl.hidden = true;
+    return;
+  }
   const moreBelow =
     !detailEl.hidden &&
     detailEl.scrollHeight > detailEl.clientHeight + 8 &&
@@ -1254,6 +1465,449 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
   root.addEventListener("pointercancel", (event) => finishDrag(event, false));
 }
 
+function shotTarget(): IslandFeedRow | null {
+  const sessionId = shot?.sessionId ?? "";
+  if (!sessionId) return lastRows.find((row) => row.current) ?? null;
+  return lastRows.find((row) => row.id === sessionId) ?? null;
+}
+
+function shotDestination(): string {
+  const agent = shotTarget()?.agent;
+  return agent ? t("island.shotTo", { agent }) : t("island.shotToCurrent");
+}
+
+/** The send control sits beside “先不发”, so the field stays a field. */
+function markShotSend(send: HTMLElement): void {
+  const field = send.closest("#island-shot-card")?.querySelector<HTMLInputElement | HTMLTextAreaElement>(".island-reply");
+  const ready = (field?.value.trim().length ?? 0) > 0;
+  const label = shotDestination();
+  send.classList.add("island-shot-send");
+  send.classList.toggle("is-ready", ready);
+  send.toggleAttribute("disabled", !ready);
+  const text = send.querySelector("span");
+  if (text && send.querySelector("svg") && text.textContent === label) return;
+  const span = document.createElement("span");
+  span.textContent = label;
+  send.replaceChildren(sendArrowIcon(), span);
+}
+
+function shotReplyText(): string {
+  if (!shot || shot.phase !== "sent") return "";
+  const row = shotTarget();
+  if (!row) return "";
+  const asked = shot.text.trim();
+  const sent = row.sent.trim();
+  const ready = row.working || sent === asked || (asked.length > 24 && sent.startsWith(asked.slice(0, 24)));
+  if (!ready) return "";
+  return row.spoken.trim();
+}
+
+function paintShotReply(host: HTMLElement): void {
+  if (!shot) return;
+  const reply = shotReplyText();
+  const waiting =
+    shot.status === "queued"
+      ? t("island.queued")
+      :     shot.status === "busy"
+      ? t("island.busyOther")
+      : t(shot.paths.length > 1 ? "island.shotLookingMany" : "island.shotLooking");
+  const sig = `${shot.status}\u0001${reply}\u0001${expandedReplyId === "shot" ? "1" : "0"}\u0001${waiting}`;
+  if (host.dataset.sig === sig) return;
+  host.dataset.sig = sig;
+  host.replaceChildren();
+  if (reply) {
+    appendReply(host, "shot", reply);
+    return;
+  }
+  const line = document.createElement("p");
+  line.className = "island-shot-waiting";
+  line.textContent = waiting;
+  host.append(line);
+}
+
+let shotZoomedPath = "";
+
+function shotKey(paths: string[]): string {
+  return paths.join("\n");
+}
+
+function rememberShotDraft(): void {
+  const field = shotCardEl?.querySelector<HTMLInputElement | HTMLTextAreaElement>(".island-reply");
+  if (shot && field) shot.text = field.value;
+}
+
+function dismissShot(): void {
+  shot = null;
+  shotZoomedPath = "";
+  shotError = "";
+  if (lastView) render(lastView);
+  else renderShotCard();
+  void islandClearShot().catch(() => {});
+}
+
+function removeShotPath(path: string): void {
+  if (!shot || shot.phase !== "compose") return;
+  const next = shot.paths.filter((item) => item !== path);
+  if (next.length === 0) {
+    dismissShot();
+    return;
+  }
+  shot.paths = next;
+  if (shotZoomedPath === path) shotZoomedPath = "";
+  void islandForgetShot(path).catch(() => {});
+  reportedHeight = 0;
+  if (lastView) render(lastView);
+  else renderShotCard();
+}
+
+function startAnotherShot(): void {
+  rememberShotDraft();
+  if ((shot?.paths.length ?? 0) >= SHOT_CAP) {
+    shotError = t("island.shotLimit");
+    if (lastView) render(lastView);
+    else renderShotCard();
+    return;
+  }
+  pointerInside = false;
+  void startRegionCapture().catch((error) => {
+    showError(error);
+  });
+}
+
+function sendShot(text: string, shown: string): void {
+  if (!shot || shot.phase !== "compose" || shotSending || shot.paths.length === 0) return;
+  const paths = [...shot.paths];
+  const key = shotKey(paths);
+  const sessionId = shotTarget()?.id ?? "";
+  shot.text = text;
+  shot.shown = shown || text;
+  shot.sessionId = sessionId;
+  shot.phase = "sent";
+  shot.status = "sent";
+  shotError = "";
+  shotSending = true;
+  if (lastView) render(lastView);
+  else renderShotCard();
+  void islandSendText(sessionId, text, paths)
+    .catch(() => {
+      if (!shot || shotKey(shot.paths) !== key) return;
+      shot.phase = "compose";
+      shot.status = "failed";
+      shotError = t("island.failed");
+      if (lastView) render(lastView);
+      else renderShotCard();
+    })
+    .finally(() => {
+      shotSending = false;
+    });
+}
+
+function noteShotSendResult(status: string, sessionId: string): void {
+  if (!shot || shot.phase !== "sent") {
+    showSendResult(status);
+    return;
+  }
+  if (sessionId) shot.sessionId = sessionId;
+  if (status === "failed" || status === "busy") {
+    shot.phase = "compose";
+    shot.status = status === "busy" ? "busy" : "failed";
+    shotError = status === "busy" ? t("island.busyOther") : t("island.failed");
+  } else {
+    shot.status = status === "queued" ? "queued" : "sent";
+    shotError = "";
+  }
+  if (lastView) render(lastView);
+  else renderShotCard();
+}
+
+function acceptIslandShot(path: string): void {
+  const next = path.trim();
+  if (!next) {
+    if (!shot) return;
+    shot = null;
+    shotZoomedPath = "";
+    shotError = "";
+    if (lastView) render(lastView);
+    else renderShotCard();
+    return;
+  }
+  if (shot?.phase === "compose" && shot.paths.includes(next)) return;
+  if (shot?.phase === "compose") {
+    if (shot.paths.length >= SHOT_CAP) {
+      shotError = t("island.shotLimit");
+      setHover(true, true);
+      if (lastView) render(lastView);
+      else renderShotCard();
+      return;
+    }
+    shotError = "";
+    shot.paths = [...shot.paths, next];
+    setHover(true, true);
+    if (lastView) render(lastView);
+    else renderShotCard();
+    return;
+  }
+  shotError = "";
+  shotZoomedPath = "";
+  shot = { paths: [next], phase: "compose", text: "", shown: "", sessionId: "", status: "" };
+  setHover(true, true);
+  if (lastView) render(lastView);
+  else renderShotCard();
+}
+
+function acceptIslandShots(paths: string[]): void {
+  const next = paths.map((path) => path.trim()).filter(Boolean).slice(0, SHOT_CAP);
+  if (next.length === 0) return;
+  if (shot?.phase === "compose" && shotKey(shot.paths) === shotKey(next)) return;
+  shotError = "";
+  shotZoomedPath = "";
+  shot = { paths: next, phase: "compose", text: shot?.text ?? "", shown: "", sessionId: "", status: "" };
+  setHover(true, true);
+  if (lastView) render(lastView);
+  else renderShotCard();
+}
+
+function acceptIslandShotSent(payload: { path?: string; text?: string; sessionId?: string }): void {
+  const path = payload.path?.trim() ?? "";
+  const text = payload.text?.trim() ?? "";
+  if (!path || !text) return;
+  const same = Boolean(shot?.paths.includes(path));
+  const paths = same && shot ? [...shot.paths] : [path];
+  const shown = same && shot?.shown ? shot.shown : text;
+  const sessionId = payload.sessionId?.trim() || shot?.sessionId || "";
+  shot = {
+    paths,
+    phase: "sent",
+    text,
+    shown,
+    sessionId,
+    status: same && shot?.status ? shot.status : "sent",
+  };
+  setHover(true, true);
+  if (lastView) render(lastView);
+  else renderShotCard();
+}
+
+function mountShotPictures(parent: HTMLElement, paths: string[]): void {
+  const strip = document.createElement("div");
+  strip.className = "island-shot-strip";
+  if (paths.length > 1) strip.classList.add("is-many");
+  for (const path of paths) {
+    const image = document.createElement("img");
+    image.className = "island-shot-thumb";
+    image.alt = "";
+    image.dataset.path = path;
+    try {
+      image.src = convertFileSrc(path);
+    } catch {
+      /* The preview below still draws the picture. */
+    }
+    image.addEventListener("load", () => {
+      reportedHeight = 0;
+      reportHeight();
+    });
+    strip.append(image);
+    void islandShotPreview(path)
+      .then((data) => {
+        if (!data.startsWith("data:image/") || !shot?.paths.includes(path)) return;
+        if (image.isConnected && image.src !== data) image.src = data;
+      })
+      .catch(() => {});
+  }
+  parent.append(strip);
+}
+
+function toggleShotZoom(path: string): void {
+  shotZoomedPath = shotZoomedPath === path ? "" : path;
+  if (!shotCardEl) return;
+  for (const frame of shotCardEl.querySelectorAll<HTMLElement>(".island-shot-frame")) {
+    const zoomed = frame.dataset.path === shotZoomedPath;
+    frame.classList.toggle("is-zoomed", zoomed);
+    frame.querySelector(".island-shot-zoom")?.setAttribute("aria-label", t(zoomed ? "island.shotHide" : "island.shotZoom"));
+  }
+  reportedHeight = 0;
+  requestAnimationFrame(() => reportHeight());
+}
+
+/** Click a picture to see it larger. 「不看了」 drops that picture. */
+function ensureShotFrames(): void {
+  if (!shotCardEl) return;
+  for (const image of shotCardEl.querySelectorAll<HTMLImageElement>(".island-shot-thumb")) {
+    const path = image.dataset.path ?? "";
+    if (!path) continue;
+    let frame = image.closest(".island-shot-frame");
+    if (!(frame instanceof HTMLElement)) {
+      const created = document.createElement("div");
+      created.className = "island-shot-frame";
+      created.dataset.path = path;
+      const zoom = document.createElement("button");
+      zoom.type = "button";
+      zoom.className = "island-shot-zoom";
+      zoom.setAttribute("aria-label", t("island.shotZoom"));
+      image.replaceWith(created);
+      zoom.append(image);
+      zoom.addEventListener("click", () => toggleShotZoom(path));
+      if (shot?.phase === "compose") {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "island-shot-remove";
+        remove.textContent = t("island.shotRemove");
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          removeShotPath(path);
+        });
+        created.append(zoom, remove);
+      } else {
+        created.append(zoom);
+      }
+      frame = created;
+    }
+    const zoomed = shotZoomedPath === path;
+    frame.classList.toggle("is-zoomed", zoomed);
+    frame.querySelector(".island-shot-zoom")?.setAttribute("aria-label", t(zoomed ? "island.shotHide" : "island.shotZoom"));
+  }
+}
+
+function buildShotCard(): void {
+  if (!shotCardEl || !shot) return;
+  shotCardEl.replaceChildren();
+  shotCardEl.dataset.path = shotKey(shot.paths);
+  shotCardEl.dataset.phase = shot.phase;
+  mountShotPictures(shotCardEl, shot.paths);
+  if (shot.phase === "compose") {
+    const chips = document.createElement("div");
+    chips.className = "island-shot-chips";
+    for (const chip of SHOT_CHIPS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "island-shot-chip";
+      button.textContent = t(chip.label);
+      button.addEventListener("click", () => sendShot(t(chip.prompt), t(chip.label)));
+      chips.append(button);
+    }
+    shotCardEl.append(chips);
+    const field = appendReplyField(
+      shotCardEl,
+      t(shot.paths.length > 1 ? "island.shotAskMany" : "island.shotAsk"),
+      false,
+      (text) => {
+        sendShot(text, text);
+      },
+    );
+    const send = field.parentElement?.querySelector<HTMLElement>(".island-send");
+    const bar = document.createElement("div");
+    bar.className = "island-shot-bar";
+    const side = document.createElement("div");
+    side.className = "island-shot-bar-side";
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "island-shot-dismiss";
+    dismiss.textContent = t("island.shotDismiss");
+    dismiss.addEventListener("click", () => dismissShot());
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "island-shot-add";
+    add.textContent = t("island.shotAdd");
+    add.addEventListener("click", () => startAnotherShot());
+    side.append(dismiss, add);
+    if (send) {
+      field.addEventListener("input", () => {
+        rememberShotDraft();
+        markShotSend(send);
+        reportedHeight = 0;
+        reportHeight();
+      });
+      bar.append(side, send);
+    } else {
+      bar.append(side);
+    }
+    window.requestAnimationFrame(() => {
+      void islandClaimKeyboard().finally(() => field.focus());
+    });
+    if (shot.text) {
+      field.value = shot.text;
+      field.closest(".island-compose")?.classList.add("is-ready");
+      if (field instanceof HTMLTextAreaElement) fitReplyField(field);
+    }
+    if (send) markShotSend(send);
+    shotCardEl.append(bar);
+    return;
+  } else {
+    const asked = document.createElement("div");
+    asked.className = "island-msg-you";
+    asked.textContent = shot.shown || shot.text;
+    const reply = document.createElement("div");
+    reply.className = "island-shot-reply";
+    shotCardEl.append(asked, reply);
+    paintShotReply(reply);
+  }
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "island-shot-dismiss";
+  dismiss.textContent = t("island.shotHide");
+  dismiss.addEventListener("click", () => dismissShot());
+  shotCardEl.append(dismiss);
+}
+
+/** The picture question is the whole card. The conversation list stays out of it. */
+function applyShotLayout(): void {
+  const on = Boolean(shot);
+  if ((root?.classList.contains("is-shot") ?? false) !== on) reportedHeight = 0;
+  root?.classList.toggle("is-shot", on);
+  const frame = detailEl?.closest(".island-read-frame");
+  if (frame instanceof HTMLElement) frame.hidden = on;
+  if (actionsEl) actionsEl.hidden = on;
+  if (on && scrollHintEl) scrollHintEl.hidden = true;
+  applyFocusChrome();
+}
+
+function renderShotCard(): void {
+  if (!shotCardEl) return;
+  applyShotLayout();
+  if (!shot) {
+    shotCardEl.hidden = true;
+    shotCardEl.replaceChildren();
+    shotCardEl.dataset.path = "";
+    shotCardEl.dataset.phase = "";
+    return;
+  }
+  shotCardEl.hidden = false;
+  const built = shotCardEl.dataset.path === shotKey(shot.paths) && shotCardEl.dataset.phase === shot.phase;
+  if (!built) {
+    shotZoomedPath = "";
+    buildShotCard();
+    reportedHeight = 0;
+  }
+  ensureShotFrames();
+  const send = shotCardEl.querySelector<HTMLElement>(".island-send");
+  if (send) markShotSend(send);
+  if (shot.phase === "sent") {
+    const host = shotCardEl.querySelector<HTMLElement>(".island-shot-reply");
+    if (host) paintShotReply(host);
+    ensureShotOpen();
+  }
+}
+
+function ensureShotOpen(): void {
+  if (!shotCardEl || shot?.phase !== "sent") return;
+  const id = shot.sessionId || shotTarget()?.id || "";
+  const existing = shotCardEl.querySelector<HTMLButtonElement>(".island-more");
+  if (!id) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "island-more";
+  more.textContent = t("island.more");
+  more.addEventListener("click", () => {
+    const sessionId = shot?.sessionId || shotTarget()?.id || "";
+    if (sessionId) void islandOpenSession(sessionId);
+  });
+  shotCardEl.querySelector(".island-shot-dismiss")?.before(more);
+}
+
 function boot(): void {
   applyStaticI18n();
   bindLocaleSync(() => {
@@ -1266,6 +1920,12 @@ function boot(): void {
   });
   detailEl?.addEventListener("scroll", syncScrollHint, { passive: true });
   if (detailEl) new ResizeObserver(syncScrollHint).observe(detailEl);
+  if (shotCardEl) {
+    new ResizeObserver(() => {
+      if (!root?.classList.contains("is-shot")) return;
+      reportHeight();
+    }).observe(shotCardEl);
+  }
   detailEl?.addEventListener(
     "wheel",
     (event) => {
@@ -1303,7 +1963,9 @@ function boot(): void {
   });
   root?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    const onControl = Boolean(target?.closest("input, textarea, button, a, .island-row-body"));
+    const onControl = Boolean(
+      target?.closest("input, textarea, button, a, .island-row-body, .island-shot-card"),
+    );
     // Cancelling mousedown also cancels the click, so buttons such as
     // 「查看更多」 would never run.
     if (!onControl) event.preventDefault();
@@ -1317,11 +1979,19 @@ function boot(): void {
   hideIdleEl?.addEventListener("change", () => {
     void islandSetHideWhenIdle(hideIdleEl.checked).catch(() => {});
   });
+  backEl?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    leaveFocus();
+  });
   screenshotEl?.addEventListener("mousedown", (event) => {
     event.stopPropagation();
   });
   screenshotEl?.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (shot?.phase === "compose") {
+      startAnotherShot();
+      return;
+    }
     pointerInside = false;
     void startRegionCapture().catch((error) => {
       showError(error);
@@ -1335,19 +2005,52 @@ function boot(): void {
   void currentIslandView()
     .then(render)
     .catch(() => {});
+  void currentIslandShot()
+    .then((paths) => {
+      const list = (Array.isArray(paths) ? paths : [paths]).map((item) => String(item).trim()).filter(Boolean);
+      if (list.length) acceptIslandShots(list);
+    })
+    .catch(() => {});
   void import("@tauri-apps/api/event")
     .then(({ listen }) =>
       listen<{ sessionId?: string; status?: string }>("island-send-result", (event) => {
-        showSendResult(event.payload?.status ?? "failed");
+        const status = event.payload?.status ?? "failed";
+        const sessionId = event.payload?.sessionId ?? "";
+        if (shot?.phase === "sent") noteShotSendResult(status, sessionId);
+        else showSendResult(status);
       }),
     )
     .catch(() => {});
   void import("@tauri-apps/api/webviewWindow")
-    .then(({ getCurrentWebviewWindow }) =>
-      getCurrentWebviewWindow().listen<IslandView>("island-view", (event) => {
+    .then(({ getCurrentWebviewWindow }) => {
+      const islandWindow = getCurrentWebviewWindow();
+      void islandWindow.listen<IslandView>("island-view", (event) => {
         render(event.payload);
-      }),
-    )
+      });
+      void islandWindow.listen<{ path?: string }>("island-shot", (event) => {
+        acceptIslandShot(event.payload?.path ?? "");
+      });
+      void islandWindow.listen<{ path?: string; text?: string; sessionId?: string }>(
+        "island-shot-sent",
+        (event) => {
+          acceptIslandShotSent(event.payload ?? {});
+        },
+      );
+      void islandWindow.listen<string>("island-shot-failed", (event) => {
+        const raw = String(event.payload ?? "").trim();
+        const plain =
+          raw && !raw.includes("/") && !raw.includes("\\") && raw.length < 200
+            ? raw
+            : t("chat.screenshotFailed");
+        shotError = plain;
+        setHover(true, true);
+        if (lastView) render(lastView);
+        else if (errorEl) {
+          errorEl.hidden = false;
+          errorEl.textContent = plain;
+        }
+      });
+    })
     .catch(() => {});
 }
 

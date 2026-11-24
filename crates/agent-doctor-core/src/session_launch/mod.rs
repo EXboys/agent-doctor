@@ -445,5 +445,31 @@ mod tests {
             ))
         );
         assert_eq!(macos_chromium_spec_for_bundle_id("com.apple.Safari"), None);
+        assert!(is_chromium_executable_path(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        ));
+        assert!(is_chromium_executable_path(
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+        ));
+        assert!(!is_chromium_executable_path("/sbin/launchd"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn singleton_lock_ignores_dead_or_non_chromium_pids() {
+        use std::os::unix::fs::symlink;
+
+        let self_path = macos_pid_executable_path(std::process::id() as i32)
+            .expect("current test process executable path");
+        assert!(!self_path.is_empty());
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        // Current test binary is alive, yet not Chromium — must not be treated as `chrome-cdp`.
+        symlink(
+            format!("local-{}", std::process::id()),
+            temp.path().join("SingletonLock"),
+        )
+        .unwrap();
+        assert_eq!(macos_singleton_lock_chromium_pid(temp.path()), None);
     }
 }

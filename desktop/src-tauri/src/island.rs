@@ -184,6 +184,8 @@ struct Inner {
     #[cfg_attr(windows, allow(dead_code))]
     screen_sig: Vec<(i32, i32)>,
     last_view: IslandView,
+    /// Screenshots waiting on the top bar. Empty once they are sent or dismissed.
+    shot_paths: Vec<String>,
 }
 
 impl Default for Inner {
@@ -217,6 +219,7 @@ impl Default for Inner {
                 pending: None,
                 tone: String::new(),
             },
+            shot_paths: Vec::new(),
         }
     }
 }
@@ -1721,9 +1724,17 @@ fn restore_conversation(app: &AppHandle, pin: bool) {
     // Remember this before activation. Bringing the app forward can unhide or
     // unminimize the home window; the island only asked for the conversation.
     let main_rest = crate::windows::main_window_rest(app);
-    activate_app();
-    crate::windows::present_ask_window(app);
-    crate::windows::settle_main_window(app, main_rest);
+    let bring = || {
+        activate_app();
+        crate::windows::present_ask_window(app);
+        crate::windows::settle_main_window(app, main_rest);
+    };
+    // The click that asked for the conversation is still on the top bar.
+    // Without this, that click would be treated as "stay on this desktop".
+    #[cfg(target_os = "macos")]
+    crate::macos_activation::allow(bring);
+    #[cfg(not(target_os = "macos"))]
+    bring();
     apply(app);
 }
 
@@ -1733,11 +1744,20 @@ pub(crate) fn on_capture_state_changed(app: &AppHandle) {
     hop(app, move |app| {
         if capturing {
             release_island_keyboard(app);
+        }
+        {
             let host = app.state::<IslandHost>();
             let mut guard = host.inner.lock().expect("island");
-            guard.hovering = false;
-            guard.opened = false;
-            guard.reading = false;
+            if capturing {
+                guard.hovering = false;
+                guard.opened = false;
+                guard.reading = false;
+            } else if !guard.shot_paths.is_empty() {
+                // Esc on a later shot should bring the pictures already taken back.
+                guard.hovering = true;
+                guard.opened = true;
+                guard.folded = false;
+            }
         }
         apply(app);
     });
@@ -1747,6 +1767,59 @@ pub(crate) fn on_capture_state_changed(app: &AppHandle) {
 /// without unhiding or unminimizing the home window.
 pub(crate) fn bring_ask_forward(app: &AppHandle) {
     hop(app, |app| restore_conversation(app, false));
+}
+
+fn open_island_card(app: &AppHandle) {
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.inner.lock().expect("island");
+        guard.hovering = true;
+        guard.opened = true;
+        guard.folded = false;
+    }
+    apply(app);
+}
+
+/// The shot stays on the current desktop. The conversation window is created
+/// in the background when it is missing, and it is not shown or focused.
+pub(crate) fn island_bar_enabled(app: &AppHandle) -> bool {
+    ensure_hide_pref_loaded(app);
+    app.state::<IslandHost>()
+        .inner
+        .lock()
+        .expect("island")
+        .enabled
+}
+
+pub(crate) fn present_island_shot(app: &AppHandle, path: String) {
+    hop(app, move |app| {
+        let path = std::fs::canonicalize(&path)
+            .map(|full| full.to_string_lossy().into_owned())
+            .unwrap_or(path);
+        let _ = crate::windows::ensure_ask_window(app, &crate::windows::default_ask_runtime());
+        {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.inner.lock().expect("island");
+            let known = guard.shot_paths.iter().any(|item| item == &path);
+            if !known && guard.shot_paths.len() < ISLAND_SHOT_CAP {
+                guard.shot_paths.push(path.clone());
+            }
+        }
+        open_island_card(app);
+        let payload = serde_json::json!({ "path": path });
+        for window in island_windows(app) {
+            let _ = window.emit("island-shot", &payload);
+        }
+    });
+}
+
+pub(crate) fn present_island_shot_failure(app: &AppHandle, message: String) {
+    hop(app, move |app| {
+        open_island_card(app);
+        for window in island_windows(app) {
+            let _ = window.emit("island-shot-failed", &message);
+        }
+    });
 }
 
 fn activate_app() {
@@ -1872,25 +1945,133 @@ pub fn island_pin_command(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+const ISLAND_SHOT_CAP: usize = 4;
+
+fn clear_island_shot(app: &AppHandle) {
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.inner.lock().expect("island");
+        guard.shot_paths.clear();
+    }
+    let payload = serde_json::json!({ "path": "" });
+    for window in island_windows(app) {
+        let _ = window.emit("island-shot", &payload);
+    }
+}
+
+#[tauri::command]
+pub fn current_island_shot_command(app: AppHandle) -> Vec<String> {
+    app.state::<IslandHost>()
+        .inner
+        .lock()
+        .expect("island")
+        .shot_paths
+        .clone()
+}
+
+/// One picture for the top-bar card. The page draws this directly, so the
+/// preview does not depend on the file URL being allowed.
+#[tauri::command]
+pub fn island_shot_preview_command(app: AppHandle, path: Option<String>) -> String {
+    let stored = app
+        .state::<IslandHost>()
+        .inner
+        .lock()
+        .expect("island")
+        .shot_paths
+        .clone();
+    let wanted = path.unwrap_or_default();
+    let chosen = if wanted.is_empty() {
+        stored.last().cloned().unwrap_or_default()
+    } else if stored.iter().any(|item| item == &wanted) {
+        wanted
+    } else {
+        String::new()
+    };
+    shot_preview_data_url(&chosen)
+}
+
+/// Drop one picture from the waiting set. The page already redrew the card.
+#[tauri::command]
+pub fn island_forget_shot_command(app: AppHandle, path: String) -> Result<(), String> {
+    let path = path.trim().to_string();
+    hop(&app, move |app| {
+        let host = app.state::<IslandHost>();
+        host.inner
+            .lock()
+            .expect("island")
+            .shot_paths
+            .retain(|item| item != &path);
+    });
+    Ok(())
+}
+
+fn shot_preview_data_url(path: &str) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+
+    if path.is_empty() {
+        return String::new();
+    }
+    let Ok(bytes) = std::fs::read(path) else {
+        return String::new();
+    };
+    if bytes.is_empty() || bytes.len() > 5_000_000 {
+        return String::new();
+    }
+    format!("data:image/png;base64,{}", STANDARD.encode(bytes))
+}
+
+#[tauri::command]
+pub fn island_clear_shot_command(app: AppHandle) -> Result<(), String> {
+    hop(&app, |app| clear_island_shot(app));
+    Ok(())
+}
+
 #[tauri::command]
 pub fn island_send_text_command(
     app: AppHandle,
     session_id: String,
     text: String,
+    paths: Option<Vec<String>>,
 ) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(());
     }
+    let paths: Vec<String> = paths
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+        .collect();
     let window = app
         .get_webview_window("ask")
         .ok_or_else(|| "ask window is closed".to_string())?;
+    let shot_path = paths.first().cloned();
     window
         .emit(
             "island-send-text",
-            serde_json::json!({ "sessionId": session_id, "text": text }),
+            serde_json::json!({ "sessionId": session_id, "text": text, "paths": paths }),
         )
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    if shot_path.is_some() {
+        hop(&app, |app| {
+            let host = app.state::<IslandHost>();
+            host.inner.lock().expect("island").shot_paths.clear();
+        });
+    }
+    if let Some(path) = shot_path {
+        let notice = serde_json::json!({
+            "path": path,
+            "text": text,
+            "sessionId": session_id,
+        });
+        for island in island_windows(&app) {
+            let _ = island.emit("island-shot-sent", &notice);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

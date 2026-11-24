@@ -176,7 +176,7 @@ pub fn open_url(url: &str) -> Result<()> {
         {
             return Ok(());
         }
-        let status = Command::new("open") // raw-spawn-ok
+        let status = Command::new("/usr/bin/open") // raw-spawn-ok
             .arg(url)
             .status()
             .context("failed to run `open` for deep link")?;
@@ -269,6 +269,16 @@ fn try_open_in_macos_everyday_browser(url: &str) -> bool {
     let Some(home) = dirs::home_dir() else {
         return false;
     };
+    // Only bypass `/usr/bin/open` while Agent Doctor's isolated `chrome-cdp`
+    // browser is actually running; otherwise LaunchServices opens the user's
+    // default browser directly without needing AppleEvents / Automation TCC.
+    if macos_singleton_lock_chromium_pid(
+        &home.join("Library/Application Support/agent-doctor/chrome-cdp"),
+    )
+    .is_none()
+    {
+        return false;
+    }
     let Some(bundle_id) = macos_default_https_bundle_id(&home) else {
         return false;
     };
@@ -278,42 +288,56 @@ fn try_open_in_macos_everyday_browser(url: &str) -> bool {
     };
 
     let user_data_dir = home.join(user_data_rel);
-    if let Ok(target) = fs::read_link(user_data_dir.join("SingletonLock")) {
-        if let Some(pid) = parse_singleton_lock_pid(&target.to_string_lossy()) {
-            if macos_pid_alive(pid) && macos_send_open_url_to_pid(pid, url).is_ok() {
+    if let Some(pid) = macos_singleton_lock_chromium_pid(&user_data_dir) {
+        return macos_send_open_url_to_pid(pid, url).is_ok();
+    }
+
+    // Everyday Chromium is not running yet while `chrome-cdp` is active:
+    // launch the everyday browser binary directly against its default profile.
+    for root in [PathBuf::from("/Applications"), home.join("Applications")] {
+        let binary = root.join(app_name).join("Contents/MacOS").join(bin_name);
+        if binary.is_file() {
+            if let Ok(mut child) = Command::new(&binary) // raw-spawn-ok
+                .arg(url)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
                 return true;
             }
         }
     }
 
-    // Everyday Chromium is not running yet; if an isolated `chrome-cdp` process
-    // is active, `open` would still land in `chrome-cdp`, so launch the everyday
-    // browser binary directly against its default user-data-dir.
-    if home
-        .join("Library/Application Support/agent-doctor/chrome-cdp/SingletonLock")
-        .symlink_metadata()
-        .is_ok()
-    {
-        for root in [PathBuf::from("/Applications"), home.join("Applications")] {
-            let binary = root.join(app_name).join("Contents/MacOS").join(bin_name);
-            if binary.is_file() {
-                if let Ok(mut child) = Command::new(&binary) // raw-spawn-ok
-                    .arg(url)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                {
-                    std::thread::spawn(move || {
-                        let _ = child.wait();
-                    });
-                    return true;
-                }
-            }
-        }
-    }
-
     false
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn macos_singleton_lock_chromium_pid(user_data_dir: &Path) -> Option<i32> {
+    let target = fs::read_link(user_data_dir.join("SingletonLock")).ok()?;
+    let pid = parse_singleton_lock_pid(&target.to_string_lossy())?;
+    #[cfg(target_os = "macos")]
+    {
+        macos_pid_executable_path(pid)
+            .is_some_and(|path| is_chromium_executable_path(&path))
+            .then_some(pid)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(pid)
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn is_chromium_executable_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.contains("google chrome")
+        || lower.contains("microsoft edge")
+        || lower.contains("brave browser")
+        || lower.contains("chromium")
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -407,12 +431,25 @@ fn macos_default_https_bundle_id(home: &Path) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_pid_alive(pid: i32) -> bool {
+pub(crate) fn macos_pid_executable_path(pid: i32) -> Option<String> {
+    const PROC_PIDPATHINFO_MAXSIZE: usize = 4096;
     extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
+        fn proc_pidpath(pid: i32, buffer: *mut std::ffi::c_void, buffersize: u32) -> i32;
     }
-    // SAFETY: `kill(pid, 0)` performs a standard POSIX existence/permission check without sending a signal.
-    unsafe { kill(pid, 0) == 0 }
+    let mut buf = [0_u8; PROC_PIDPATHINFO_MAXSIZE];
+    // SAFETY: `buf` is a valid writable buffer of `PROC_PIDPATHINFO_MAXSIZE` bytes.
+    let len = unsafe {
+        proc_pidpath(
+            pid,
+            buf.as_mut_ptr().cast(),
+            PROC_PIDPATHINFO_MAXSIZE as u32,
+        )
+    };
+    if len <= 0 {
+        return None;
+    }
+    let len = (len as usize).min(PROC_PIDPATHINFO_MAXSIZE);
+    Some(String::from_utf8_lossy(&buf[..len]).into_owned())
 }
 
 #[cfg(target_os = "macos")]
@@ -447,6 +484,15 @@ fn macos_send_open_url_to_pid(pid: i32, url: &str) -> Result<()> {
             data_ptr: *const std::ffi::c_void,
             data_size: isize,
         ) -> i32;
+        fn AEGetParamPtr(
+            the_apple_event: *const AEDesc,
+            the_ae_keyword: u32,
+            desired_type: u32,
+            actual_type: *mut u32,
+            data_ptr: *mut std::ffi::c_void,
+            maximum_size: isize,
+            actual_size: *mut isize,
+        ) -> i32;
         fn AESendMessage(
             event: *const AEDesc,
             reply: *mut AEDesc,
@@ -461,11 +507,15 @@ fn macos_send_open_url_to_pid(pid: i32, url: &str) -> Result<()> {
     const K_AE_MISC_STANDARDS: u32 = 0x6d69_7363; // 'misc'
     const K_AE_ACTIVATE: u32 = 0x6163_7476; // 'actv'
     const KEY_DIRECT_OBJECT: u32 = 0x2d2d_2d2d; // '----'
+    const KEY_ERROR_NUMBER: u32 = 0x6572_726e; // 'errn'
     const TYPE_UTF8_TEXT: u32 = 0x7574_6638; // 'utf8'
+    const TYPE_SINT32: u32 = 0x6c6f_6e67; // 'long'
     const K_AUTO_GENERATE_RETURN_ID: i16 = -1;
     const K_ANY_TRANSACTION_ID: i32 = 0;
     const K_AE_NO_REPLY: i32 = 0x1;
+    const K_AE_WAIT_REPLY: i32 = 0x3;
     const K_AE_DEFAULT_TIMEOUT: isize = -1;
+    const WAIT_REPLY_TIMEOUT_TICKS: isize = 120; // 2 seconds
 
     // SAFETY: All descriptors are zero-initialized, checked for `noErr` (0), and disposed before return.
     unsafe {
@@ -513,7 +563,36 @@ fn macos_send_open_url_to_pid(pid: i32, url: &str) -> Result<()> {
                 descriptor_type: 0,
                 data_handle: std::ptr::null_mut(),
             };
-            AESendMessage(&gurl_event, &mut reply, K_AE_NO_REPLY, K_AE_DEFAULT_TIMEOUT)
+            // Wait for the reply so TCC Automation denials (-1743) or dead
+            // targets surface as errors and fall back to `/usr/bin/open`
+            // instead of silently swallowing the login URL.
+            let status = AESendMessage(
+                &gurl_event,
+                &mut reply,
+                K_AE_WAIT_REPLY,
+                WAIT_REPLY_TIMEOUT_TICKS,
+            );
+            let mut handler_err: i32 = 0;
+            let mut actual_type: u32 = 0;
+            let mut actual_size: isize = 0;
+            if status == 0
+                && AEGetParamPtr(
+                    &reply,
+                    KEY_ERROR_NUMBER,
+                    TYPE_SINT32,
+                    &mut actual_type,
+                    (&mut handler_err as *mut i32).cast(),
+                    std::mem::size_of::<i32>() as isize,
+                    &mut actual_size,
+                ) == 0
+                && handler_err != 0
+            {
+                let _ = AEDisposeDesc(&mut reply);
+                handler_err
+            } else {
+                let _ = AEDisposeDesc(&mut reply);
+                status
+            }
         } else {
             param_err
         };
