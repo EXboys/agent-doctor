@@ -187,6 +187,9 @@ struct Inner {
     last_view: IslandView,
     /// Screenshots waiting on the top bar. Empty once they are sent or dismissed.
     shot_paths: Vec<String>,
+    /// Last seen Ask-in-front bit. Collapse the card only on the rising edge,
+    /// so a click that opens it is not cleared on the next refresh.
+    ask_was_in_front: bool,
 }
 
 impl Default for Inner {
@@ -221,6 +224,7 @@ impl Default for Inner {
                 tone: String::new(),
             },
             shot_paths: Vec::new(),
+            ask_was_in_front: false,
         }
     }
 }
@@ -529,14 +533,16 @@ fn apply_once(app: &AppHandle) {
     let (chrome, snapshot, parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
         let mut guard = host.inner.lock().expect("island");
-        // Coming back to the conversation closes the chip. The next time it
-        // appears, it starts as the short bar again.
-        if ask_in_front {
+        // Coming back to the conversation closes the card once. Keep doing it
+        // every refresh while Ask stays focused would fight a click that
+        // opens the Windows chip again.
+        if ask_in_front && !guard.ask_was_in_front {
             guard.hovering = false;
             guard.opened = false;
             guard.reading = false;
             guard.folded = false;
         }
+        guard.ask_was_in_front = ask_in_front;
         let awake = island_awake(&guard.snapshot);
         let enabled = guard.enabled;
         let attention = pending_opens_card(guard.snapshot.pending.as_ref());
@@ -2171,7 +2177,15 @@ pub fn island_claim_keyboard_command(app: AppHandle) -> Result<(), String> {
         }
     }
     #[cfg(windows)]
-    hop(&app, claim_island_keyboard);
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let app = app.clone();
+        let _ = app.clone().run_on_main_thread(move || {
+            claim_island_keyboard(&app);
+            let _ = tx.send(());
+        });
+        let _ = rx.recv_timeout(Duration::from_millis(400));
+    }
     #[cfg(not(any(target_os = "macos", windows)))]
     let _ = app;
     Ok(())
