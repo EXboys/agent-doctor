@@ -513,6 +513,36 @@ pub(crate) fn join_reader(handle: thread::JoinHandle<()>, budget: Duration) {
     }
 }
 
+/// Read lines as bytes so a CP936 / GBK stderr or tool line on Windows never
+/// aborts `BufRead::lines` with `InvalidData` and closes the pipe while the
+/// child is still running.
+pub(crate) fn read_lossy_lines<R: std::io::Read, F: FnMut(String)>(pipe: R, mut on_line: F) {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(pipe);
+    let mut buf = Vec::with_capacity(512);
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(_) => {
+                if buf.ends_with(b"\n") {
+                    buf.pop();
+                    if buf.ends_with(b"\r") {
+                        buf.pop();
+                    }
+                }
+                let line = match std::str::from_utf8(&buf) {
+                    Ok(valid) => valid.to_string(),
+                    Err(_) => String::from_utf8_lossy(&buf).into_owned(),
+                };
+                on_line(line);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
 /// A runtime log record by shape: `[subsystem] message` with a lowercase tag.
 /// Not a reply, wherever it shows up.
 pub(crate) fn is_runtime_log_line(line: &str) -> bool {
@@ -932,5 +962,23 @@ mod tests {
             "capture must stay a prefix of the line"
         );
         assert!(rest.len() < line.len(), "the line must actually be capped");
+    }
+
+    #[test]
+    fn non_utf8_gbk_bytes_do_not_drop_later_lines() {
+        // Chinese Windows tools write CP936/GBK on stderr/stdout. A lossy byte
+        // line reader must keep reading subsequent UTF-8 JSON-RPC lines instead
+        // of stopping on `InvalidData` and closing the child's pipe.
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"first\r\n");
+        raw.extend_from_slice(&[0xb2, 0xbb, 0xca, 0xc7, b'\r', b'\n']);
+        raw.extend_from_slice(b"{\"id\":1,\"result\":{}}\n");
+
+        let mut lines = Vec::new();
+        read_lossy_lines(std::io::Cursor::new(raw), |line| lines.push(line));
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "first");
+        assert!(lines[1].contains('\u{fffd}'));
+        assert_eq!(lines[2], "{\"id\":1,\"result\":{}}");
     }
 }

@@ -67,8 +67,6 @@ const SHOT_CHIPS = [
 
 let hoverTimer = 0;
 let pointerInside = false;
-let pointerX = 0;
-let pointerY = 0;
 let renderedRequest = "";
 let sending = false;
 let feedSig = "";
@@ -88,27 +86,21 @@ function setHover(hovering: boolean, sticky = false): void {
     return;
   }
   hoverTimer = window.setTimeout(() => {
-    // A shrinking card can slip out from under the pointer. That is not a leave.
+    // A spurious leave during a row rebuild stays open while `:hover` still matches.
     if (pointerOverIsland()) return;
     const field = document.activeElement;
     const typing =
       (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
       field.value.trim() !== "";
-    if (!typing && field instanceof HTMLElement) field.blur();
+    const keepOpen = typing || shot?.phase === "compose";
+    if (!keepOpen && field instanceof HTMLElement) field.blur();
     pointerInside = false;
-    void islandSetHover(false, typing).catch(() => {});
+    void islandSetHover(false, keepOpen).catch(() => {});
   }, 180);
 }
 
-function notePointer(event: MouseEvent): void {
-  pointerX = event.clientX;
-  pointerY = event.clientY;
-}
-
 function pointerOverIsland(): boolean {
-  if (!root) return false;
-  const hit = document.elementFromPoint(pointerX, pointerY);
-  return hit === root || Boolean(hit && root.contains(hit));
+  return Boolean(root?.matches(":hover"));
 }
 
 function showSendResult(status: string): void {
@@ -1358,6 +1350,7 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
   let pumping = false;
   let gesture: {
     pointerId: number;
+    target: Element | null;
     startX: number;
     startY: number;
     lastX: number;
@@ -1397,10 +1390,15 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
   root.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest("input, textarea, button, a, .island-row-body")) return;
+    if (
+      target?.closest("input, textarea, button, a, label, .island-row-body, .island-shot-card")
+    ) {
+      return;
+    }
     const pointerId = event.pointerId;
     gesture = {
       pointerId,
+      target,
       startX: event.screenX,
       startY: event.screenY,
       lastX: event.screenX,
@@ -1411,7 +1409,6 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
       moved: false,
       done: false,
     };
-    root.setPointerCapture(pointerId);
     void import("@tauri-apps/api/webviewWindow")
       .then(async ({ getCurrentWebviewWindow }) => {
         const win = getCurrentWebviewWindow();
@@ -1437,7 +1434,13 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
     const dx = current.lastX - current.startX;
     const dy = current.lastY - current.startY;
     if (!current.moved && Math.hypot(dx, dy) < CHIP_DRAG_SLOP) return;
-    current.moved = true;
+    if (!current.moved) {
+      current.moved = true;
+      // Capture only once a drag starts so clicks inside the card keep their own target.
+      try {
+        root.setPointerCapture(event.pointerId);
+      } catch {}
+    }
     root.classList.add("is-dragging");
     placeGesture(false);
   });
@@ -1452,10 +1455,15 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
     if (!current.moved) {
       gesture = null;
       if (!restoreOnClick) return;
-      // Collapsed chip → open the card. Expanded → leave it; use
-      // 「在对话里打开」when the person wants the full window.
+      // Collapsed chip → open the card. Clicking the top pill bar again folds
+      // it back; clicks inside the card body keep it open.
       if (!root.classList.contains("is-expanded")) {
         setHover(true, true);
+      } else if (!shot && current.target?.closest(".island-pill")) {
+        window.clearTimeout(hoverTimer);
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        pointerInside = false;
+        void islandSetHover(false, false).catch(() => {});
       }
       return;
     }
@@ -1955,14 +1963,12 @@ function boot(): void {
     },
     { passive: false },
   );
-  root?.addEventListener("mouseenter", (event) => {
+  root?.addEventListener("mouseenter", () => {
     if (document.documentElement.classList.contains("is-status-chip")) return;
-    notePointer(event);
     setHover(true);
   });
-  root?.addEventListener("mousemove", (event) => {
+  root?.addEventListener("mousemove", () => {
     if (document.documentElement.classList.contains("is-status-chip")) return;
-    notePointer(event);
     setHover(true);
   });
   root?.addEventListener("mousedown", (event) => {
@@ -1981,6 +1987,29 @@ function boot(): void {
   });
   bindStatusChipDrag(root);
   root?.addEventListener("mouseleave", () => setHover(false));
+  window.addEventListener("blur", () => {
+    if (!pointerOverIsland()) setHover(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.isComposing) return;
+    if (shot?.phase === "compose") {
+      event.preventDefault();
+      dismissShot();
+      return;
+    }
+    if (openRowId) {
+      event.preventDefault();
+      leaveFocus();
+      return;
+    }
+    if (root?.classList.contains("is-expanded")) {
+      event.preventDefault();
+      window.clearTimeout(hoverTimer);
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      pointerInside = false;
+      void islandSetHover(false, false).catch(() => {});
+    }
+  });
   hideIdleEl?.addEventListener("change", () => {
     void islandSetHideWhenIdle(hideIdleEl.checked).catch(() => {});
   });

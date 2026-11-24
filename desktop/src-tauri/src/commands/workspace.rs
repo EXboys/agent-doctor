@@ -69,18 +69,23 @@ pub async fn init_workspace_command(
 }
 
 #[tauri::command]
-pub fn use_workspace_command(
+pub async fn use_workspace_command(
     name: String,
     app: tauri::AppHandle,
 ) -> Result<UseWorkspaceReport, String> {
-    let report = use_workspace_with_options(
-        &name,
-        &UseWorkspaceOptions {
-            backup: true,
-            restart_gateways: false,
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    let target = name.clone();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        use_workspace_with_options(
+            &target,
+            &UseWorkspaceOptions {
+                backup: true,
+                restart_gateways: false,
+            },
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
     rebuild_tray_menu(&app);
     let _ = app.emit("workspace-changed", &name);
@@ -96,8 +101,13 @@ pub fn set_workspace_title_command(
 }
 
 #[tauri::command]
-pub fn remove_workspace_command(name: String, app: tauri::AppHandle) -> Result<(), String> {
-    remove_workspace(&name, false).map_err(|error| error.to_string())?;
+pub async fn remove_workspace_command(name: String, app: tauri::AppHandle) -> Result<(), String> {
+    let target = name.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_workspace(&target, false).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
     rebuild_tray_menu(&app);
     let _ = app.emit("workspace-changed", &name);
@@ -105,30 +115,44 @@ pub fn remove_workspace_command(name: String, app: tauri::AppHandle) -> Result<(
 }
 
 #[tauri::command]
-pub fn workspace_status_command() -> Result<WorkspaceStatusReport, String> {
-    workspace_status(None).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn workspace_doctor_command() -> Result<WorkspaceDoctorReport, String> {
-    workspace_doctor().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn workspace_fix_command(migrate_claude_mcp: bool) -> Result<WorkspaceFixReport, String> {
-    workspace_fix(&WorkspaceFixOptions {
-        dry_run: false,
-        restart_gateways: false,
-        migrate_claude_mcp,
+pub async fn workspace_status_command() -> Result<WorkspaceStatusReport, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        workspace_status(None).map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn list_agent_memory_command(
+pub async fn workspace_doctor_command() -> Result<WorkspaceDoctorReport, String> {
+    tauri::async_runtime::spawn_blocking(|| workspace_doctor().map_err(|error| error.to_string()))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn workspace_fix_command(migrate_claude_mcp: bool) -> Result<WorkspaceFixReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        workspace_fix(&WorkspaceFixOptions {
+            dry_run: false,
+            restart_gateways: false,
+            migrate_claude_mcp,
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn list_agent_memory_command(
     runtime: String,
     workspace_name: Option<String>,
 ) -> Result<AgentMemoryReport, String> {
-    list_runtime_agent_memory(&runtime, workspace_name.as_deref())
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        list_runtime_agent_memory(&runtime, workspace_name.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

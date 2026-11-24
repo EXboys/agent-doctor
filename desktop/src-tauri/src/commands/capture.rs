@@ -156,10 +156,18 @@ pub(crate) fn start_region_capture(app: &AppHandle, requester: &str) -> Result<(
     Ok(())
 }
 
-/// Sync command so the windows are built on the main thread, where Tauri needs it.
+/// Async command that hops onto the UI thread after WebView2's IPC callback
+/// returns. Building `WebviewWindow` synchronously inside `WebResourceRequested`
+/// / `WebMessageReceived` deadlocks WebView2 on Windows.
 #[tauri::command]
-pub fn start_region_capture_command(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    start_region_capture(&app, window.label())
+pub async fn start_region_capture_command(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<(), String> {
+    let requester = window.label().to_string();
+    let app_for_ui = app.clone();
+    crate::windows::run_on_main_thread(&app, move || start_region_capture(&app_for_ui, &requester))
+        .await
 }
 
 /// The overlay finished a drag: grab the live screen on the Space the person
@@ -445,31 +453,36 @@ pub fn take_pending_screenshot_command() -> Option<String> {
     PENDING_SHOT.lock().ok()?.take()
 }
 
-/// Drop the picker without a shot.
+/// Drop the picker without a shot. Runs on the UI thread outside WebView2's
+/// IPC callback so an overlay never destroys itself mid-callback.
 #[tauri::command]
-pub fn cancel_region_capture_command(app: AppHandle) -> Result<(), String> {
-    CAPTURING.store(false, Ordering::SeqCst);
-    if let Some(session) = take_region() {
-        eprintln!("[screenshot] cancelled");
-        let initiator = session.initiator.clone();
-        let from_external_space = session.from_external_space;
-        let stay = session.stay_on_island;
-        close_overlays(&app, Some(session));
-        crate::island::on_capture_state_changed(&app);
-        if stay {
-            end_stay(&app);
-        }
-        let _ = app.emit_to(initiator.clone(), "screenshot-cancelled", ());
-        // If they started from the island/tray or swiped to another Space on
-        // macOS, Esc should leave them on the Space they are looking at rather
-        // than yanking them back to the chat window.
-        if !from_external_space && !cfg!(target_os = "macos") {
-            if let Some(chat) = app.get_webview_window(&initiator) {
-                let _ = chat.set_focus();
+pub async fn cancel_region_capture_command(app: AppHandle) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    crate::windows::run_on_main_thread(&app, move || {
+        CAPTURING.store(false, Ordering::SeqCst);
+        if let Some(session) = take_region() {
+            eprintln!("[screenshot] cancelled");
+            let initiator = session.initiator.clone();
+            let from_external_space = session.from_external_space;
+            let stay = session.stay_on_island;
+            close_overlays(&app_for_ui, Some(session));
+            crate::island::on_capture_state_changed(&app_for_ui);
+            if stay {
+                end_stay(&app_for_ui);
+            }
+            let _ = app_for_ui.emit_to(initiator.clone(), "screenshot-cancelled", ());
+            // If they started from the island/tray or swiped to another Space on
+            // macOS, Esc should leave them on the Space they are looking at rather
+            // than yanking them back to the chat window.
+            if !from_external_space && !cfg!(target_os = "macos") {
+                if let Some(chat) = app_for_ui.get_webview_window(&initiator) {
+                    let _ = chat.set_focus();
+                }
             }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// Drop the dim layer without a shot, before the live capture runs.

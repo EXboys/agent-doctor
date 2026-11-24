@@ -372,7 +372,7 @@ fn run_codex_app_server(
         warm::enabled().then(|| warm::fingerprint(&cmd, &codex_config_files(&cwd, &overlay)));
     let keep_alive = fingerprint.is_some();
 
-    let mut reused: Option<(Result<CodexPumpOutcome>, Child, LivePipes)> = None;
+    let mut reused: Option<(Result<CodexPumpOutcome>, bool, Child, LivePipes)> = None;
     if let (Some(fp), Some(thread_id)) = (fingerprint, resume_thread_id.as_deref()) {
         if let Some(parked) = warm::take("codex", thread_id, fp) {
             let warm::WarmProcess {
@@ -394,10 +394,14 @@ fn run_codex_app_server(
                     &control,
                     &mut state,
                     keep_alive,
+                    true,
                     &mut emit,
                 )
                 .map(|outcome| (outcome, state.thread_id.clone()));
-                reused = Some((outcome, child, pipes));
+                let accepted_turn = state.waiting_turn.is_none()
+                    || state.saw_agent_delta
+                    || state.last_turn_error.is_some();
+                reused = Some((outcome, accepted_turn, child, pipes));
             } else {
                 control.close();
                 warm::retire_without_stdin(child, pipes);
@@ -408,26 +412,36 @@ fn run_codex_app_server(
     let mut dropped_resume = false;
     let mut exec_retries_left = 1;
     let reused = match reused {
-        Some((Err(err), mut child, mut pipes)) if is_thread_open_failure(&err) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            pipes.join(Duration::from_millis(500));
+        Some((Err(err), _, mut child, mut pipes)) if is_warm_unresponsive(&err) => {
+            stop_app_server_child(&control, &mut child, &mut pipes);
+            None
+        }
+        Some((Err(err), _, mut child, mut pipes)) if is_thread_open_failure(&err) => {
+            stop_app_server_child(&control, &mut child, &mut pipes);
             dropped_resume = true;
             resume_thread_id = None;
             None
         }
-        Some((Ok(done), mut child, mut pipes))
+        Some((Ok(done), _, mut child, mut pipes))
             if exec_retries_left > 0 && outcome_is_exec_selection(&done.0, &display_text) =>
         {
-            let _ = child.kill();
-            let _ = child.wait();
-            pipes.join(Duration::from_millis(500));
+            stop_app_server_child(&control, &mut child, &mut pipes);
             exec_retries_left = 0;
             dropped_resume = true;
             resume_thread_id = None;
             None
         }
-        other => other,
+        Some((Ok(done), false, mut child, mut pipes))
+            if done.0 .0 == PromptSessionStatus::Failed
+                && !cancel.handle().load(Ordering::SeqCst) =>
+        {
+            // Parked process died before accepting `turn/start` (e.g. after
+            // sleep/wake on Windows). Resume the same thread on a fresh server.
+            stop_app_server_child(&control, &mut child, &mut pipes);
+            None
+        }
+        Some((outcome, _, child, pipes)) => Some((outcome, child, pipes)),
+        None => None,
     };
     let (result, child, pipes) = match reused {
         Some(done) => done,
@@ -440,10 +454,11 @@ fn run_codex_app_server(
                 let mut child = attempt_cmd
                     .spawn()
                     .context("failed to spawn codex app-server")?;
+                let pid = child.id();
                 if let Some(stdin) = child.stdin.take() {
                     control.attach_stdin(stdin);
                 } else {
-                    let _ = child.kill();
+                    force_stop_child(&mut child, pid);
                     bail!("codex app-server missing stdin pipe");
                 }
                 // Read stdout before any request. On Windows a full pipe blocks
@@ -452,8 +467,7 @@ fn run_codex_app_server(
                     Ok(pipes) => pipes,
                     Err(err) => {
                         control.close();
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        force_stop_child(&mut child, pid);
                         return Err(err);
                     }
                 };
@@ -517,6 +531,7 @@ fn run_codex_app_server(
                         &control,
                         &mut state,
                         keep_alive,
+                        false,
                         &mut emit,
                     )?;
                     Ok((outcome, state.thread_id))
@@ -524,10 +539,7 @@ fn run_codex_app_server(
 
                 match attempt {
                     Err(err) if allow_fresh_start && is_thread_open_failure(&err) => {
-                        control.close();
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        pipes.join(Duration::from_millis(500));
+                        stop_app_server_child(&control, &mut child, &mut pipes);
                         allow_fresh_start = false;
                         dropped_resume = true;
                         resume_attempt = None;
@@ -537,10 +549,7 @@ fn run_codex_app_server(
                         if exec_retries_left > 0
                             && outcome_is_exec_selection(&outcome, &display_text) =>
                     {
-                        control.close();
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        pipes.join(Duration::from_millis(500));
+                        stop_app_server_child(&control, &mut child, &mut pipes);
                         exec_retries_left = 0;
                         allow_fresh_start = false;
                         dropped_resume = true;
@@ -796,6 +805,19 @@ fn codex_config_files(
     files
 }
 
+/// Kill the whole `cmd -> node -> codex` process tree after closing stdin so
+/// no orphaned `codex.exe` holds `CODEX_HOME` locks or pipe handles on Windows.
+fn stop_app_server_child(control: &PromptSessionControl, child: &mut Child, pipes: &mut LivePipes) {
+    control.close();
+    let pid = child.id();
+    force_stop_child(child, pid);
+    pipes.join(Duration::from_millis(500));
+}
+
+fn is_warm_unresponsive(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("codex warm session did not respond")
+}
+
 /// Read one turn. With `keep_alive` the server stays up after the turn so it
 /// can be parked; otherwise stdin closes and the process is reaped.
 #[allow(clippy::too_many_arguments)]
@@ -807,6 +829,7 @@ fn pump_app_server<F>(
     control: &PromptSessionControl,
     state: &mut PumpState,
     keep_alive: bool,
+    reused_warm: bool,
     on_event: &mut F,
 ) -> Result<super::PumpResult>
 where
@@ -818,6 +841,8 @@ where
     let exit_code;
     let mut timeout_note = None;
     let mut shutdown_started: Option<Instant> = None;
+    let mut stdout_closed_at: Option<Instant> = None;
+    let mut saw_stdout_line = false;
     let mut still_running = false;
 
     loop {
@@ -827,6 +852,7 @@ where
         }
         for (is_stdout, line) in drained {
             if is_stdout {
+                saw_stdout_line = true;
                 handle_rpc_line(line, control, state, on_event)?;
             } else if !is_runtime_stderr_noise(&line) {
                 on_event(stderr_event(&state.session_id, &line));
@@ -846,6 +872,15 @@ where
             pipes.join(Duration::from_millis(500));
             bail!("codex thread did not open: timed out");
         }
+        if reused_warm
+            && state.waiting_turn.is_some()
+            && !saw_stdout_line
+            && state.thread_wait_started.elapsed() >= THREAD_OPEN_BUDGET
+        {
+            force_stop_child(child, pid);
+            pipes.join(Duration::from_millis(500));
+            bail!("codex warm session did not respond");
+        }
 
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
@@ -861,7 +896,11 @@ where
             break;
         }
 
-        if state.turn_done && keep_alive && matches!(child.try_wait(), Ok(None)) {
+        if state.turn_done
+            && keep_alive
+            && !pipes.stdout_closed()
+            && matches!(child.try_wait(), Ok(None))
+        {
             status = PromptSessionStatus::Succeeded;
             exit_code = None;
             still_running = true;
@@ -894,6 +933,17 @@ where
                     status = PromptSessionStatus::Succeeded;
                     exit_code = None;
                     break;
+                }
+                if !state.turn_done && pipes.stdout_closed() {
+                    // Inner `codex.exe` closed stdout while an outer `cmd`/`node`
+                    // wrapper stayed alive; nothing else can arrive on JSON-RPC.
+                    let closed_at = stdout_closed_at.get_or_insert_with(Instant::now);
+                    if closed_at.elapsed() >= Duration::from_millis(400) {
+                        force_stop_child(child, pid);
+                        status = PromptSessionStatus::Failed;
+                        exit_code = None;
+                        break;
+                    }
                 }
                 thread::sleep(Duration::from_millis(40));
             }

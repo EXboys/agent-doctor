@@ -185,6 +185,32 @@ impl PromptSessionState {
         run.cancel.request();
         Ok(true)
     }
+
+    /// Cancel every in-flight prompt session and wait briefly for its worker
+    /// loop (`40ms` cadence) to reap its process tree before the app exits.
+    pub fn shutdown(&self, budget: std::time::Duration) {
+        let had_active = match self.runs.lock() {
+            Ok(runs) if !runs.is_empty() => {
+                for run in runs.values() {
+                    run.control.close();
+                    run.cancel.request();
+                }
+                true
+            }
+            _ => false,
+        };
+        if !had_active {
+            return;
+        }
+        let started = std::time::Instant::now();
+        while started.elapsed() < budget {
+            let empty = self.runs.lock().map(|runs| runs.is_empty()).unwrap_or(true);
+            if empty {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
 }
 
 fn ask_id(event: &PromptSessionEvent) -> Option<&str> {

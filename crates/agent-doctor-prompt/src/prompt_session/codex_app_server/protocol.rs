@@ -175,6 +175,7 @@ where
     let thread_id = state.thread_id.clone().context("no open Codex thread")?;
     let turn_id = next_rpc_id();
     state.waiting_turn = Some(turn_id);
+    state.thread_wait_started = std::time::Instant::now();
     on_event(PromptSessionEvent::Status {
         session_id: state.session_id.clone(),
         phase: "requesting".into(),
@@ -286,6 +287,7 @@ pub(crate) fn handle_notification<F>(
             }
         }
         "turn/started" => {
+            state.waiting_turn = None;
             state.last_turn_error = None;
             on_event(PromptSessionEvent::Status {
                 session_id: state.session_id.clone(),

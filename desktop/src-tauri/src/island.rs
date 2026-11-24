@@ -10,7 +10,7 @@
 //! card. The person can drag the chip anywhere on its screen; the spot is
 //! remembered until it no longer fits.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -147,6 +147,8 @@ impl From<IslandSnapshotInput> for Snapshot {
     }
 }
 
+type UiJob = Box<dyn FnOnce(&AppHandle) + Send + 'static>;
+
 struct Inner {
     snapshot: Snapshot,
     hovering: bool,
@@ -168,12 +170,27 @@ struct Inner {
     parked_main: bool,
     applying: bool,
     dirty: bool,
+    /// One `flush_ui` message is already in flight to the UI thread.
+    ui_scheduled: bool,
+    /// Pending chip drag/commit waiting for the UI thread, keyed by window label.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pending_place: HashMap<String, (f64, f64, bool)>,
+    /// Pending conversation restore: `Some((pin, Some(session_id)))` also switches chat.
+    pending_restore: Option<(bool, Option<String>)>,
+    /// Pending Windows foreground focus claim, drained after any resize finishes.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pending_focus: bool,
+    /// One-shot UI actions (`emit`, `release_island_keyboard`) drained in FIFO order.
+    deferred_ui: VecDeque<UiJob>,
     /// Whether the saved idle-hide choice has been read.
     pref_loaded: bool,
     /// The person can turn the top bar off in settings. On until they say otherwise.
     enabled: bool,
     /// Last placed size and screen origin, so status text can update without resizing.
     placed: HashMap<String, (i32, i32, i32, i32)>,
+    /// Last `--island-notch` pixel value applied to each window, so streaming updates
+    /// do not invoke `WebView::eval` (`ExecuteScript`) 25 times per second.
+    notch_px: HashMap<String, i32>,
     /// Whether the saved chip spots have been read.
     chip_place_loaded: bool,
     /// Logical top-left of a chip, keyed by the physical origin of its work area.
@@ -207,9 +224,15 @@ impl Default for Inner {
             parked_main: false,
             applying: false,
             dirty: false,
+            ui_scheduled: false,
+            pending_place: HashMap::new(),
+            pending_restore: None,
+            pending_focus: false,
+            deferred_ui: VecDeque::new(),
             pref_loaded: false,
             enabled: true,
             placed: HashMap::new(),
+            notch_px: HashMap::new(),
             chip_place_loaded: false,
             chip_place: HashMap::new(),
             chip_drag: HashMap::new(),
@@ -226,6 +249,69 @@ impl Default for Inner {
             shot_paths: Vec::new(),
             ask_was_in_front: false,
         }
+    }
+}
+
+impl Inner {
+    /// Return whether the caller must post `flush_ui` to the UI thread.
+    /// While `applying` or already scheduled, the running/queued pass drains
+    /// every pending field on its own.
+    fn schedule_ui(&mut self) -> bool {
+        if self.applying || self.ui_scheduled {
+            false
+        } else {
+            self.ui_scheduled = true;
+            true
+        }
+    }
+
+    fn request_apply(&mut self) -> bool {
+        self.dirty = true;
+        self.schedule_ui()
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn queue_place(&mut self, label: String, x: f64, y: f64, commit: bool) -> bool {
+        let prev_commit = self
+            .pending_place
+            .get(&label)
+            .is_some_and(|(_, _, prev)| *prev);
+        self.pending_place
+            .insert(label, (x, y, commit || prev_commit));
+        self.schedule_ui()
+    }
+
+    fn queue_restore(&mut self, pin: bool, session_id: Option<String>) -> bool {
+        match &mut self.pending_restore {
+            Some((prev_pin, prev_session)) => {
+                *prev_pin |= pin;
+                if session_id.is_some() {
+                    *prev_session = session_id;
+                }
+            }
+            slot => *slot = Some((pin, session_id)),
+        }
+        self.dirty = true;
+        self.schedule_ui()
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn request_focus(&mut self) -> bool {
+        self.pending_focus = true;
+        self.schedule_ui()
+    }
+
+    fn defer_ui(&mut self, job: UiJob) -> bool {
+        self.deferred_ui.push_back(job);
+        self.schedule_ui()
+    }
+
+    fn has_pending_ui(&self) -> bool {
+        self.dirty
+            || self.pending_restore.is_some()
+            || !self.pending_place.is_empty()
+            || self.pending_focus
+            || !self.deferred_ui.is_empty()
     }
 }
 
@@ -328,11 +414,12 @@ fn windows_ask_in_front(app: &AppHandle) -> bool {
     }
 }
 
-/// Ask gained or lost focus. The chip follows immediately, without waiting
-/// for the next status publish.
+/// Ask gained or lost focus. The chip follows on the next UI message.
+/// Resizing from inside the focus callback calls WebView2 `SetBounds` while
+/// that callback is still on the stack, and the window then stops closing.
 pub(crate) fn on_ask_focus_changed(app: &AppHandle) {
     #[cfg(windows)]
-    apply(app);
+    schedule_apply(app);
     #[cfg(not(windows))]
     let _ = app;
 }
@@ -505,32 +592,70 @@ pub(crate) fn on_ask_closed(app: &AppHandle) {
         guard.hovering = false;
         guard.parked_ask = false;
     }
-    apply(app);
+    schedule_apply(app);
+}
+
+fn schedule_apply(app: &AppHandle) {
+    if !cfg!(any(target_os = "macos", windows)) {
+        return;
+    }
+    if app.state::<IslandHost>().lock().request_apply() {
+        hop(app, flush_ui);
+    }
+}
+
+fn defer_ui(app: &AppHandle, job: impl FnOnce(&AppHandle) + Send + 'static) {
+    if !cfg!(any(target_os = "macos", windows)) {
+        return;
+    }
+    if app.state::<IslandHost>().lock().defer_ui(Box::new(job)) {
+        hop(app, flush_ui);
+    }
 }
 
 fn apply(app: &AppHandle) {
     if !cfg!(any(target_os = "macos", windows)) {
         return;
     }
+    app.state::<IslandHost>().lock().dirty = true;
+    flush_ui(app);
+}
+
+fn flush_ui(app: &AppHandle) {
+    if !cfg!(any(target_os = "macos", windows)) {
+        return;
+    }
     {
         let host = app.state::<IslandHost>();
         let mut guard = host.lock();
+        guard.ui_scheduled = false;
         if guard.applying {
-            guard.dirty = true;
+            return;
+        }
+        if !guard.has_pending_ui() {
             return;
         }
         guard.applying = true;
-        guard.dirty = false;
     }
     loop {
-        apply_once(app);
+        drain_pending_restore(app);
+        let run_apply = {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.lock();
+            std::mem::take(&mut guard.dirty)
+        };
+        if run_apply {
+            apply_once(app);
+        }
+        drain_pending_places(app);
+        drain_pending_focus(app);
+        drain_deferred_ui(app);
         let host = app.state::<IslandHost>();
         let mut guard = host.lock();
-        if !guard.dirty {
+        if !guard.has_pending_ui() {
             guard.applying = false;
             break;
         }
-        guard.dirty = false;
     }
 }
 
@@ -722,9 +847,22 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
             place_island_frame(&window, x, y, width, height);
             let host = app.state::<IslandHost>();
             let mut guard = host.lock();
-            guard.placed.insert(label, place_key);
+            guard.placed.insert(label.clone(), place_key);
         }
-        set_notch_inset(&window, notch_inset);
+        let px = notch_inset.round().max(0.0) as i32;
+        let notch_changed = {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.lock();
+            if guard.notch_px.get(&label) == Some(&px) {
+                false
+            } else {
+                guard.notch_px.insert(label, px);
+                true
+            }
+        };
+        if notch_changed {
+            set_notch_inset(&window, px);
+        }
     }
     for window in island_windows(app) {
         if !keep.iter().any(|label| label == window.label()) {
@@ -1106,56 +1244,50 @@ fn chip_position_on_monitor(
 /// Move the Windows chip or expanded card. A commit remembers the spot; a drag
 /// only follows the pointer. Size follows the current chrome so a Peek drag
 /// does not clamp as if it were still the short bar.
+#[cfg(windows)]
 fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool) {
-    #[cfg(windows)]
-    {
-        if !is_island_label(label) || !x.is_finite() || !y.is_finite() {
-            return;
-        }
-        let Some(index) = island_index(label) else {
-            return;
-        };
-        let monitors = monitors_for_island(app);
-        let Some(monitor) = monitors.get(index) else {
-            return;
-        };
-        let Some(work) = logical_work(monitor) else {
-            return;
-        };
-        let Some(window) = app.get_webview_window(label) else {
-            return;
-        };
-        let (width, height) = status_chip_drag_size(app, &window, work.w);
-        let (x, y) = clamp_chip_to_work(x, y, width, height, work);
-        let key = work_key(monitor);
-        let persist = {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            if commit {
-                guard.chip_drag.remove(label);
-                guard.chip_place.insert(key, (x, y));
-            } else {
-                guard.chip_drag.insert(label.to_string(), (x, y));
-            }
-            guard.placed.insert(
-                label.to_string(),
-                (
-                    x.round() as i32,
-                    y.round() as i32,
-                    width.round() as i32,
-                    height.round() as i32,
-                ),
-            );
-            commit.then(|| guard.chip_place.clone())
-        };
-        let _ = window.set_position(LogicalPosition::new(x, y));
-        if let Some(map) = persist {
-            write_chip_place(app, &map);
-        }
+    if !is_island_label(label) || !x.is_finite() || !y.is_finite() {
+        return;
     }
-    #[cfg(not(windows))]
-    {
-        let _ = (app, label, x, y, commit);
+    let Some(index) = island_index(label) else {
+        return;
+    };
+    let monitors = monitors_for_island(app);
+    let Some(monitor) = monitors.get(index) else {
+        return;
+    };
+    let Some(work) = logical_work(monitor) else {
+        return;
+    };
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    let (width, height) = status_chip_drag_size(app, &window, work.w);
+    let (x, y) = clamp_chip_to_work(x, y, width, height, work);
+    let key = work_key(monitor);
+    let persist = {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        if commit {
+            guard.chip_drag.remove(label);
+            guard.chip_place.insert(key, (x, y));
+        } else {
+            guard.chip_drag.insert(label.to_string(), (x, y));
+        }
+        guard.placed.insert(
+            label.to_string(),
+            (
+                x.round() as i32,
+                y.round() as i32,
+                width.round() as i32,
+                height.round() as i32,
+            ),
+        );
+        commit.then(|| guard.chip_place.clone())
+    };
+    let _ = window.set_position(LogicalPosition::new(x, y));
+    if let Some(map) = persist {
+        write_chip_place(app, &map);
     }
 }
 
@@ -1253,17 +1385,22 @@ fn ensure_screen_follow(app: &AppHandle) {
 fn refresh_screens(app: &AppHandle) {
     #[cfg(windows)]
     {
-        apply(app);
-        let shown = {
+        // `apply` sizes the chip through WebView2 `SetBounds`, and `SetBounds`
+        // pumps the queue. Queue both the frame check and the topmost refresh
+        // into `flush_ui` so `guard.applying` covers every `SetWindowPos` call.
+        {
             let host = app.state::<IslandHost>();
-            let guard = host.lock();
-            guard.last_view.shown
-        };
-        if shown {
-            for window in island_windows(app) {
-                present_island(&window);
-            }
+            let mut guard = host.lock();
+            guard.dirty = true;
+            guard.deferred_ui.push_back(Box::new(|app| {
+                if app.state::<IslandHost>().lock().last_view.shown {
+                    for window in island_windows(app) {
+                        present_island(&window);
+                    }
+                }
+            }));
         }
+        flush_ui(app);
     }
     #[cfg(not(windows))]
     refresh_notch_screens(app);
@@ -1335,8 +1472,7 @@ fn ensure_island_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWi
     Some(window)
 }
 
-fn set_notch_inset(window: &tauri::WebviewWindow, inset: f64) {
-    let px = inset.round().max(0.0) as i32;
+fn set_notch_inset(window: &tauri::WebviewWindow, px: i32) {
     let _ = window.eval(format!(
         "document.documentElement.style.setProperty('--island-notch','{px}px')"
     ));
@@ -1392,12 +1528,12 @@ fn present_island(window: &tauri::WebviewWindow) {
     if order_front_without_activating(window) {
         return;
     }
-    let _ = window.set_always_on_top(true);
-    let _ = window.set_visible_on_all_workspaces(true);
     #[cfg(windows)]
     if present_status_chip(window) {
         return;
     }
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_visible_on_all_workspaces(true);
     let _ = window.show();
 }
 
@@ -1410,6 +1546,7 @@ fn present_status_chip(window: &tauri::WebviewWindow) -> bool {
     #[link(name = "user32")]
     extern "system" {
         fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
+        fn IsWindowVisible(hwnd: *mut c_void) -> i32;
         fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, new_long: isize) -> isize;
         fn SetWindowPos(
             hwnd: *mut c_void,
@@ -1441,16 +1578,13 @@ fn present_status_chip(window: &tauri::WebviewWindow) -> bool {
         if style & WS_EX_TOOLWINDOW == 0 {
             SetWindowLongPtrW(raw, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW);
         }
-        let _ = ShowWindow(raw, SW_SHOWNOACTIVATE);
-        SetWindowPos(
-            raw,
-            HWND_TOPMOST as *mut c_void,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        ) != 0
+        let visible = IsWindowVisible(raw) != 0;
+        let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+        if !visible {
+            let _ = ShowWindow(raw, SW_SHOWNOACTIVATE);
+            flags |= SWP_SHOWWINDOW;
+        }
+        SetWindowPos(raw, HWND_TOPMOST as *mut c_void, 0, 0, 0, 0, flags) != 0
     }
 }
 
@@ -1712,8 +1846,22 @@ fn release_island_keyboard(_app: &AppHandle) {}
 
 /// Focus the island window so the reply field can take IME input. The chip
 /// stays NOACTIVATE while idle; only an explicit claim brings the keyboard.
+///
+/// Direct `SetForegroundWindow` instead of tao's `window.set_focus()`: tao
+/// falls back to `SendInput` of Left-Alt when foreground lock refuses, which
+/// drops a synthetic Alt into whatever window the person was typing in. A real
+/// click on the reply field already handed us foreground permission, and when
+/// Windows refuses an unattended claim we leave the active window alone.
 #[cfg(windows)]
 fn claim_island_keyboard(app: &AppHandle) {
+    use std::ffi::c_void;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetForegroundWindow() -> *mut c_void;
+        fn SetForegroundWindow(hwnd: *mut c_void) -> i32;
+    }
+
     let windows = island_windows(app);
     let target = windows
         .iter()
@@ -1722,7 +1870,15 @@ fn claim_island_keyboard(app: &AppHandle) {
     let Some(window) = target else {
         return;
     };
-    let _ = window.set_focus();
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let raw = hwnd.0;
+    unsafe {
+        if GetForegroundWindow() != raw {
+            let _ = SetForegroundWindow(raw);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1779,7 +1935,35 @@ fn click_lands_on_island(point: objc2_foundation::NSPoint) -> bool {
 
 fn hop(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
     let app = app.clone();
-    let _ = app.clone().run_on_main_thread(move || f(&app));
+    #[cfg(windows)]
+    {
+        // `tauri-runtime-wry` runs `run_on_main_thread` inline when the caller
+        // is already the UI thread. Sync commands run inside WebView2's
+        // `WebMessageReceived` on that thread, so an inline call re-enters
+        // `SetBounds` and stops the window from closing. Posting from one
+        // dedicated worker thread forces `EventLoopProxy::send_event`
+        // (`PostMessageW`) in strict FIFO order without spawning Tokio tasks.
+        type PostJob = Box<dyn FnOnce() + Send + 'static>;
+        static POSTER: std::sync::OnceLock<std::sync::mpsc::Sender<PostJob>> =
+            std::sync::OnceLock::new();
+        let tx = POSTER.get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<PostJob>();
+            std::thread::spawn(move || {
+                while let Ok(job) = rx.recv() {
+                    job();
+                }
+            });
+            tx
+        });
+        let _ = tx.send(Box::new(move || {
+            let again = app.clone();
+            let _ = app.run_on_main_thread(move || f(&again));
+        }));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app.clone().run_on_main_thread(move || f(&app));
+    }
 }
 
 fn store_snapshot(app: &AppHandle, input: IslandSnapshotInput) {
@@ -1803,7 +1987,33 @@ fn store_snapshot(app: &AppHandle, input: IslandSnapshotInput) {
     guard.snapshot = next;
 }
 
-fn restore_conversation(app: &AppHandle, pin: bool) {
+fn schedule_restore(app: &AppHandle, pin: bool, session_id: Option<String>) {
+    if !cfg!(any(target_os = "macos", windows)) {
+        return;
+    }
+    if app
+        .state::<IslandHost>()
+        .lock()
+        .queue_restore(pin, session_id)
+    {
+        hop(app, flush_ui);
+    }
+}
+
+fn drain_pending_restore(app: &AppHandle) {
+    let pending = app.state::<IslandHost>().lock().pending_restore.take();
+    let Some((pin, session_id)) = pending else {
+        return;
+    };
+    bring_conversation_to_front(app, pin);
+    if let Some(session_id) = session_id {
+        if let Some(window) = app.get_webview_window("ask") {
+            let _ = window.emit("island-open-session", session_id);
+        }
+    }
+}
+
+fn bring_conversation_to_front(app: &AppHandle, pin: bool) {
     release_island_keyboard(app);
     {
         let host = app.state::<IslandHost>();
@@ -1834,49 +2044,88 @@ fn restore_conversation(app: &AppHandle, pin: bool) {
     crate::macos_activation::allow(bring);
     #[cfg(not(target_os = "macos"))]
     bring();
-    apply(app);
+}
+
+fn drain_pending_places(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        loop {
+            let batch: Vec<(String, (f64, f64, bool))> = {
+                let mut guard = app.state::<IslandHost>().lock();
+                if guard.pending_place.is_empty() {
+                    return;
+                }
+                guard.pending_place.drain().collect()
+            };
+            for (label, (x, y, commit)) in batch {
+                place_status_chip(app, &label, x, y, commit);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = app;
+}
+
+fn drain_pending_focus(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        let wanted = {
+            let mut guard = app.state::<IslandHost>().lock();
+            std::mem::take(&mut guard.pending_focus)
+        };
+        if wanted {
+            claim_island_keyboard(app);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = app;
+}
+
+fn drain_deferred_ui(app: &AppHandle) {
+    loop {
+        let next = app.state::<IslandHost>().lock().deferred_ui.pop_front();
+        let Some(job) = next else {
+            return;
+        };
+        job(app);
+    }
 }
 
 /// Hide the top bar while a screen-region picker is open, and bring it back after.
 pub(crate) fn on_capture_state_changed(app: &AppHandle) {
     let capturing = crate::commands::is_region_capture_open();
-    hop(app, move |app| {
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
         if capturing {
-            release_island_keyboard(app);
+            guard.hovering = false;
+            guard.opened = false;
+            guard.reading = false;
+        } else if !guard.shot_paths.is_empty() {
+            // Esc on a later shot should bring the pictures already taken back.
+            guard.hovering = true;
+            guard.opened = true;
+            guard.folded = false;
         }
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            if capturing {
-                guard.hovering = false;
-                guard.opened = false;
-                guard.reading = false;
-            } else if !guard.shot_paths.is_empty() {
-                // Esc on a later shot should bring the pictures already taken back.
-                guard.hovering = true;
-                guard.opened = true;
-                guard.folded = false;
-            }
-        }
-        apply(app);
-    });
+    }
+    if capturing {
+        defer_ui(app, release_island_keyboard);
+    }
+    schedule_apply(app);
 }
 
 /// Bring the Ask conversation forward after capturing a region on another Space,
 /// without unhiding or unminimizing the home window.
 pub(crate) fn bring_ask_forward(app: &AppHandle) {
-    hop(app, |app| restore_conversation(app, false));
+    schedule_restore(app, false, None);
 }
 
-fn open_island_card(app: &AppHandle) {
-    {
-        let host = app.state::<IslandHost>();
-        let mut guard = host.lock();
-        guard.hovering = true;
-        guard.opened = true;
-        guard.folded = false;
-    }
-    apply(app);
+fn mark_island_card_open(app: &AppHandle) {
+    let host = app.state::<IslandHost>();
+    let mut guard = host.lock();
+    guard.hovering = true;
+    guard.opened = true;
+    guard.folded = false;
 }
 
 /// The shot stays on the current desktop. The conversation window is created
@@ -1887,20 +2136,27 @@ pub(crate) fn island_bar_enabled(app: &AppHandle) -> bool {
 }
 
 pub(crate) fn present_island_shot(app: &AppHandle, path: String) {
-    hop(app, move |app| {
-        let path = std::fs::canonicalize(&path)
-            .map(|full| full.to_string_lossy().into_owned())
-            .unwrap_or(path);
-        let _ = crate::windows::ensure_ask_window(app, &crate::windows::default_ask_runtime());
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            let known = guard.shot_paths.iter().any(|item| item == &path);
-            if !known && guard.shot_paths.len() < ISLAND_SHOT_CAP {
-                guard.shot_paths.push(path.clone());
-            }
+    let path = std::fs::canonicalize(&path)
+        .map(|full| full.to_string_lossy().into_owned())
+        .unwrap_or(path);
+    let missing_ask_runtime = app
+        .get_webview_window("ask")
+        .is_none()
+        .then(crate::windows::default_ask_runtime);
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        let known = guard.shot_paths.iter().any(|item| item == &path);
+        if !known && guard.shot_paths.len() < ISLAND_SHOT_CAP {
+            guard.shot_paths.push(path.clone());
         }
-        open_island_card(app);
+    }
+    mark_island_card_open(app);
+    schedule_apply(app);
+    defer_ui(app, move |app| {
+        if let Some(runtime) = missing_ask_runtime.as_deref() {
+            let _ = crate::windows::ensure_ask_window(app, runtime);
+        }
         let payload = serde_json::json!({ "path": path });
         for window in island_windows(app) {
             let _ = window.emit("island-shot", &payload);
@@ -1909,8 +2165,9 @@ pub(crate) fn present_island_shot(app: &AppHandle, path: String) {
 }
 
 pub(crate) fn present_island_shot_failure(app: &AppHandle, message: String) {
-    hop(app, move |app| {
-        open_island_card(app);
+    mark_island_card_open(app);
+    schedule_apply(app);
+    defer_ui(app, move |app| {
         for window in island_windows(app) {
             let _ = window.emit("island-shot-failed", &message);
         }
@@ -1940,10 +2197,8 @@ pub fn publish_island_snapshot_command(
     app: AppHandle,
     snapshot: IslandSnapshotInput,
 ) -> Result<(), String> {
-    hop(&app, move |app| {
-        store_snapshot(app, snapshot);
-        apply(app);
-    });
+    store_snapshot(&app, snapshot);
+    schedule_apply(&app);
     Ok(())
 }
 
@@ -1953,45 +2208,42 @@ pub fn island_set_hover_command(
     hovering: bool,
     sticky: Option<bool>,
 ) -> Result<(), String> {
-    hop(&app, move |app| {
-        let left = !hovering && !sticky.unwrap_or(false);
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            if hovering {
-                guard.folded = false;
-                if sticky.unwrap_or(false) {
-                    guard.opened = true;
-                }
-            }
-            guard.hovering = hovering;
-            if left {
-                guard.opened = false;
-                guard.reading = false;
-                guard.folded = guard.last_view.expanded;
+    let left = !hovering && !sticky.unwrap_or(false);
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        if hovering {
+            guard.folded = false;
+            if sticky.unwrap_or(false) {
+                guard.opened = true;
             }
         }
+        guard.hovering = hovering;
         if left {
-            release_island_keyboard(app);
+            guard.opened = false;
+            guard.reading = false;
+            guard.folded = guard.last_view.expanded;
         }
-        apply(app);
-    });
+    }
+    if left {
+        #[cfg(target_os = "macos")]
+        defer_ui(&app, release_island_keyboard);
+    }
+    schedule_apply(&app);
     Ok(())
 }
 
 #[tauri::command]
 pub fn island_set_reading_command(app: AppHandle, reading: bool) -> Result<(), String> {
-    hop(&app, move |app| {
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            guard.reading = reading;
-            if reading {
-                guard.folded = false;
-            }
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        guard.reading = reading;
+        if reading {
+            guard.folded = false;
         }
-        apply(app);
-    });
+    }
+    schedule_apply(&app);
     Ok(())
 }
 
@@ -2000,23 +2252,25 @@ pub fn island_set_content_height_command(app: AppHandle, height: f64) -> Result<
     if !height.is_finite() || height < 0.0 {
         return Ok(());
     }
-    hop(&app, move |app| {
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            if (guard.content_height - height).abs() < 2.0 {
-                return;
-            }
+    let changed = {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        if (guard.content_height - height).abs() < 2.0 {
+            false
+        } else {
             guard.content_height = height;
+            true
         }
-        apply(app);
-    });
+    };
+    if changed {
+        schedule_apply(&app);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub fn island_restore_command(app: AppHandle) -> Result<(), String> {
-    hop(&app, move |app| restore_conversation(app, false));
+    schedule_restore(&app, false, None);
     Ok(())
 }
 
@@ -2028,15 +2282,27 @@ pub fn island_place_chip_command(
     y: f64,
     commit: bool,
 ) -> Result<(), String> {
-    hop(&app, move |app| {
-        place_status_chip(app, &label, x, y, commit)
-    });
+    #[cfg(windows)]
+    {
+        if !is_island_label(&label) || !x.is_finite() || !y.is_finite() {
+            return Ok(());
+        }
+        if app
+            .state::<IslandHost>()
+            .lock()
+            .queue_place(label, x, y, commit)
+        {
+            hop(&app, flush_ui);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (app, label, x, y, commit);
     Ok(())
 }
 
 #[tauri::command]
 pub fn island_pin_command(app: AppHandle) -> Result<(), String> {
-    hop(&app, move |app| restore_conversation(app, true));
+    schedule_restore(&app, true, None);
     Ok(())
 }
 
@@ -2079,10 +2345,10 @@ pub fn island_shot_preview_command(app: AppHandle, path: Option<String>) -> Stri
 #[tauri::command]
 pub fn island_forget_shot_command(app: AppHandle, path: String) -> Result<(), String> {
     let path = path.trim().to_string();
-    hop(&app, move |app| {
-        let host = app.state::<IslandHost>();
-        host.lock().shot_paths.retain(|item| item != &path);
-    });
+    app.state::<IslandHost>()
+        .lock()
+        .shot_paths
+        .retain(|item| item != &path);
     Ok(())
 }
 
@@ -2104,7 +2370,7 @@ fn shot_preview_data_url(path: &str) -> String {
 
 #[tauri::command]
 pub fn island_clear_shot_command(app: AppHandle) -> Result<(), String> {
-    hop(&app, clear_island_shot);
+    defer_ui(&app, clear_island_shot);
     Ok(())
 }
 
@@ -2129,28 +2395,28 @@ pub fn island_send_text_command(
         .get_webview_window("ask")
         .ok_or_else(|| "ask window is closed".to_string())?;
     let shot_path = paths.first().cloned();
-    window
-        .emit(
+    // `emit` runs script in the webview. Deferring through `flush_ui` keeps it
+    // outside `WebMessageReceived` and outside any active `SetBounds` pump.
+    let notice_text = text.clone();
+    let notice_session = session_id.clone();
+    defer_ui(&app, move |app| {
+        let _ = window.emit(
             "island-send-text",
             serde_json::json!({ "sessionId": session_id, "text": text, "paths": paths }),
-        )
-        .map_err(|err| err.to_string())?;
-    if shot_path.is_some() {
-        hop(&app, |app| {
-            let host = app.state::<IslandHost>();
-            host.lock().shot_paths.clear();
-        });
-    }
-    if let Some(path) = shot_path {
+        );
+        let Some(path) = shot_path else {
+            return;
+        };
+        app.state::<IslandHost>().lock().shot_paths.clear();
         let notice = serde_json::json!({
             "path": path,
-            "text": text,
-            "sessionId": session_id,
+            "text": notice_text,
+            "sessionId": notice_session,
         });
-        for island in island_windows(&app) {
+        for island in island_windows(app) {
             let _ = island.emit("island-shot-sent", &notice);
         }
-    }
+    });
     Ok(())
 }
 
@@ -2172,13 +2438,11 @@ pub fn island_claim_keyboard_command(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let app = app.clone();
-        let _ = app.clone().run_on_main_thread(move || {
-            claim_island_keyboard(&app);
-            let _ = tx.send(());
-        });
-        let _ = rx.recv_timeout(Duration::from_millis(400));
+        // Waiting on the UI thread here deadlocks it, and focusing inline
+        // re-enters WebView2 while `WebMessageReceived` is still on the stack.
+        if app.state::<IslandHost>().lock().request_focus() {
+            hop(&app, flush_ui);
+        }
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     let _ = app;
@@ -2187,13 +2451,7 @@ pub fn island_claim_keyboard_command(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn island_open_session_command(app: AppHandle, session_id: String) -> Result<(), String> {
-    hop(&app, move |app| {
-        // Also brings back windows hidden for a browser turn, and keeps them up for it.
-        restore_conversation(app, false);
-        if let Some(window) = app.get_webview_window("ask") {
-            let _ = window.emit("island-open-session", session_id);
-        }
-    });
+    schedule_restore(&app, false, Some(session_id));
     Ok(())
 }
 
@@ -2211,37 +2469,33 @@ pub fn island_enabled_command(app: AppHandle) -> bool {
 
 #[tauri::command]
 pub fn island_set_enabled_command(app: AppHandle, enabled: bool) -> Result<(), String> {
-    hop(&app, move |app| {
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            guard.pref_loaded = true;
-            guard.enabled = enabled;
-            if !enabled {
-                guard.hovering = false;
-                guard.opened = false;
-                guard.reading = false;
-                guard.folded = false;
-            }
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        guard.pref_loaded = true;
+        guard.enabled = enabled;
+        if !enabled {
+            guard.hovering = false;
+            guard.opened = false;
+            guard.reading = false;
+            guard.folded = false;
         }
-        write_enabled_pref(app, enabled);
-        apply(app);
-    });
+    }
+    write_enabled_pref(&app, enabled);
+    schedule_apply(&app);
     Ok(())
 }
 
 #[tauri::command]
 pub fn island_set_hide_when_idle_command(app: AppHandle, hide: bool) -> Result<(), String> {
-    hop(&app, move |app| {
-        {
-            let host = app.state::<IslandHost>();
-            let mut guard = host.lock();
-            guard.pref_loaded = true;
-            guard.snapshot.hide_when_idle = hide;
-        }
-        write_hide_pref(app, hide);
-        apply(app);
-    });
+    {
+        let host = app.state::<IslandHost>();
+        let mut guard = host.lock();
+        guard.pref_loaded = true;
+        guard.snapshot.hide_when_idle = hide;
+    }
+    write_hide_pref(&app, hide);
+    schedule_apply(&app);
     Ok(())
 }
 
@@ -2566,5 +2820,64 @@ mod tests {
         assert_eq!(parsed, map);
         let broken = parse_chip_place("nope\n1 2 3\n4 5 nan 6\n");
         assert!(broken.is_empty());
+    }
+
+    #[test]
+    fn rapid_refreshes_queue_only_one_ui_pass() {
+        let mut inner = super::Inner::default();
+        assert!(inner.request_apply());
+        assert!(!inner.request_apply());
+        assert!(!inner.request_focus());
+        assert!(!inner.defer_ui(Box::new(|_| {})));
+
+        // The UI pass starts. A refresh during `SetBounds` marks `dirty`
+        // instead of posting another message on top of it.
+        inner.ui_scheduled = false;
+        inner.dirty = false;
+        inner.pending_focus = false;
+        inner.deferred_ui.clear();
+        inner.applying = true;
+        assert!(!inner.request_apply());
+        assert!(!inner.request_focus());
+        assert!(inner.dirty);
+        assert!(inner.pending_focus);
+
+        // Once the pass finishes, the next refresh posts again.
+        inner.applying = false;
+        inner.dirty = false;
+        inner.pending_focus = false;
+        assert!(inner.request_apply());
+    }
+
+    #[test]
+    fn chip_drags_coalesce_and_wait_out_an_active_resize() {
+        let mut inner = super::Inner::default();
+        assert!(inner.queue_place("island".into(), 100.0, 40.0, false));
+        assert!(!inner.queue_place("island".into(), 140.0, 52.0, true));
+        assert!(!inner.queue_place("island".into(), 160.0, 60.0, false));
+        assert!(!inner.dirty);
+        assert_eq!(
+            inner.pending_place.get("island").copied(),
+            Some((160.0, 60.0, true))
+        );
+
+        // While `flush_ui` is resizing, a drag never posts its own `SetWindowPos`.
+        inner.pending_place.clear();
+        inner.ui_scheduled = false;
+        inner.applying = true;
+        assert!(!inner.queue_place("island".into(), 200.0, 70.0, false));
+        assert_eq!(
+            inner.pending_place.get("island").copied(),
+            Some((200.0, 70.0, false))
+        );
+    }
+
+    #[test]
+    fn restore_requests_keep_both_pin_and_target_session() {
+        let mut inner = super::Inner::default();
+        assert!(inner.queue_restore(true, None));
+        assert!(!inner.queue_restore(false, Some("s-42".into())));
+        assert!(inner.dirty);
+        assert_eq!(inner.pending_restore, Some((true, Some("s-42".into()))));
     }
 }

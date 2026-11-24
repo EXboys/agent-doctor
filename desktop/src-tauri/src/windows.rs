@@ -518,7 +518,7 @@ fn main_window_logical_size(window: &tauri::WebviewWindow) -> Result<(f64, f64),
 /// Callers must be `async` commands: a sync invoke can land inside WebView2's
 /// `WebResourceRequested` COM stack, and blocking there for `run_on_main_thread`
 /// deadlocks the same UI thread that would run `f`.
-async fn run_on_main_thread<T, F>(app: &AppHandle, f: F) -> Result<T, String>
+pub(crate) async fn run_on_main_thread<T, F>(app: &AppHandle, f: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
@@ -1620,17 +1620,21 @@ pub async fn close_diagnose_window_command(
 
 /// Focus the main window and ask it to open a tab (e.g. `resources`).
 #[tauri::command]
-pub fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(), String> {
-    show_main_window(&app);
-    if let Some(window) = app.get_webview_window("main") {
-        let tab = tab
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("resources");
-        let _ = window.emit("main-navigate", serde_json::json!({ "tab": tab }));
-    }
-    Ok(())
+pub async fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        show_main_window(&app_for_ui);
+        if let Some(window) = app_for_ui.get_webview_window("main") {
+            let tab = tab
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("resources");
+            let _ = window.emit("main-navigate", serde_json::json!({ "tab": tab }));
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(test)]

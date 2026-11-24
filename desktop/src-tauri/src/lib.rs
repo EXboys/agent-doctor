@@ -88,32 +88,40 @@ fn get_evotown_status_command() -> EvotownStatus {
 }
 
 #[tauri::command]
-fn run_evotown_onboarding_command(
+async fn run_evotown_onboarding_command(
     url: String,
     key: String,
     sync_skills: bool,
     pull_policies: bool,
 ) -> Result<OnboardingReport, String> {
-    execute_evotown_onboarding(&OnboardingOptions {
-        url,
-        api_key: key,
-        hermes_provider: "openai".to_string(),
-        sync_skills,
-        pull_policies,
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_evotown_onboarding(&OnboardingOptions {
+            url,
+            api_key: key,
+            hermes_provider: "openai".to_string(),
+            sync_skills,
+            pull_policies,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn run_sync_command() -> Result<SyncReport, String> {
-    execute_skills_sync(&SkillsSyncOptions {
-        dry_run: false,
-        only_skills: Vec::new(),
-        runtime_target: None,
-        pack_or_bundle_id: None,
-        source_override: None,
+async fn run_sync_command() -> Result<SyncReport, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        execute_skills_sync(&SkillsSyncOptions {
+            dry_run: false,
+            only_skills: Vec::new(),
+            runtime_target: None,
+            pack_or_bundle_id: None,
+            source_override: None,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -141,30 +149,34 @@ fn get_engine_register_status_command() -> EngineRegisterStatus {
 }
 
 #[tauri::command]
-fn run_engine_register_command(
+async fn run_engine_register_command(
     bootstrap_token: String,
     engine_id: Option<String>,
     rotate: bool,
 ) -> Result<RegisterReport, String> {
-    let token = bootstrap_token.trim();
+    let token = bootstrap_token.trim().to_string();
     if token.is_empty() {
         return Err("bootstrap token is required".into());
     }
-    execute_register(&RegisterOptions {
-        bootstrap_token: Some(token.to_string()),
-        engine_id: engine_id
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
-        engine_type: None,
-        runtime: None,
-        display_name: None,
-        owner_team: None,
-        deployment_kind: None,
-        engine_version: None,
-        rotate,
-        save_token: true,
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_register(&RegisterOptions {
+            bootstrap_token: Some(token),
+            engine_id: engine_id
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            engine_type: None,
+            runtime: None,
+            display_name: None,
+            owner_team: None,
+            deployment_kind: None,
+            engine_version: None,
+            rotate,
+            save_token: true,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -250,33 +262,41 @@ fn apply_profile_model_command(
 }
 
 #[tauri::command]
-fn open_browser_url_command(url: String, app: tauri::AppHandle) -> Result<(), String> {
-    let trimmed = url.trim();
+async fn open_browser_url_command(url: String, app: tauri::AppHandle) -> Result<(), String> {
+    let trimmed = url.trim().to_string();
     if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
         return Err("仅支持打开 http/https 链接".to_string());
     }
-    if agent_doctor_core::open_url(trimmed).is_ok() {
-        return Ok(());
-    }
-    app.opener()
-        .open_url(trimmed, None::<&str>)
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        if agent_doctor_core::open_url(&trimmed).is_ok() {
+            return Ok(());
+        }
+        app.opener()
+            .open_url(&trimmed, None::<&str>)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> {
-    let candidate = std::path::Path::new(&path);
-    // The webview can only ask for paths this app printed itself, but an
-    // injected page would ride the same invoke. Only folders and plain
-    // documents open, so "reveal this file" can never turn into launching
-    // an executable container.
-    let meta = std::fs::metadata(candidate).map_err(|err| format!("{path} 不存在（{err}）"))?;
-    if !meta.is_dir() && !is_document_path(candidate) {
-        return Err(format!("出于安全考虑，不打开 {path}"));
-    }
-    app.opener()
-        .open_path(path, None::<&str>)
-        .map_err(|error| error.to_string())
+async fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let candidate = std::path::Path::new(&path);
+        // The webview can only ask for paths this app printed itself, but an
+        // injected page would ride the same invoke. Only folders and plain
+        // documents open, so "reveal this file" can never turn into launching
+        // an executable container.
+        let meta = std::fs::metadata(candidate).map_err(|err| format!("{path} 不存在（{err}）"))?;
+        if !meta.is_dir() && !is_document_path(candidate) {
+            return Err(format!("出于安全考虑，不打开 {path}"));
+        }
+        app.opener()
+            .open_path(path, None::<&str>)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn is_document_path(path: &std::path::Path) -> bool {
@@ -859,59 +879,69 @@ fn send_permission_reply(
 /// consent — nothing reports automatically — and the payload is anonymous:
 /// ids, tool names, error classes, timings; never chat content.
 #[tauri::command]
-fn report_prompt_log_command() -> Result<(), String> {
-    let log = prompt_log::read_log()
-        .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| "no prompt log yet".to_string())?;
-    let store = agent_doctor_core::store::open_settings_store().map_err(|e| format!("{e:#}"))?;
-    let install_id =
-        agent_doctor_core::install_ping::install_id(&store).map_err(|e| format!("{e:#}"))?;
-    let report = agent_doctor_core::client_log::ClientLogReport {
-        install_id,
-        version: env!("CARGO_PKG_VERSION"),
-        os: std::env::consts::OS,
-        arch: std::env::consts::ARCH,
-        client: "desktop",
-        reason: agent_doctor_core::client_log::REASON_ALLOW_MISSED.into(),
-        log,
-        note: None,
-        runtime: None,
-        turn_status: None,
-    };
-    agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
+async fn report_prompt_log_command() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let log = prompt_log::read_log()
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| "no prompt log yet".to_string())?;
+        let store =
+            agent_doctor_core::store::open_settings_store().map_err(|e| format!("{e:#}"))?;
+        let install_id =
+            agent_doctor_core::install_ping::install_id(&store).map_err(|e| format!("{e:#}"))?;
+        let report = agent_doctor_core::client_log::ClientLogReport {
+            install_id,
+            version: env!("CARGO_PKG_VERSION"),
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            client: "desktop",
+            reason: agent_doctor_core::client_log::REASON_ALLOW_MISSED.into(),
+            log,
+            note: None,
+            runtime: None,
+            turn_status: None,
+        };
+        agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// A rating click or a feedback-form submit. Same anonymous payload as the
 /// missed-allow report; the empty log simply travels empty instead of
 /// failing the report, because a fresh install has nothing to attach.
 #[tauri::command]
-fn report_feedback_command(
+async fn report_feedback_command(
     reason: String,
     note: Option<String>,
     runtime: Option<String>,
     turn_status: Option<String>,
 ) -> Result<(), String> {
-    let log = prompt_log::read_log().unwrap_or_default();
-    let store = agent_doctor_core::store::open_settings_store().map_err(|e| format!("{e:#}"))?;
-    let install_id =
-        agent_doctor_core::install_ping::install_id(&store).map_err(|e| format!("{e:#}"))?;
-    let report = agent_doctor_core::client_log::ClientLogReport {
-        install_id,
-        version: env!("CARGO_PKG_VERSION"),
-        os: std::env::consts::OS,
-        arch: std::env::consts::ARCH,
-        client: "desktop",
-        reason,
-        log,
-        note: agent_doctor_core::client_log::clean_note(&note.unwrap_or_default()),
-        runtime: runtime
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
-        turn_status: turn_status
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
-    };
-    agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = prompt_log::read_log().unwrap_or_default();
+        let store =
+            agent_doctor_core::store::open_settings_store().map_err(|e| format!("{e:#}"))?;
+        let install_id =
+            agent_doctor_core::install_ping::install_id(&store).map_err(|e| format!("{e:#}"))?;
+        let report = agent_doctor_core::client_log::ClientLogReport {
+            install_id,
+            version: env!("CARGO_PKG_VERSION"),
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            client: "desktop",
+            reason,
+            log,
+            note: agent_doctor_core::client_log::clean_note(&note.unwrap_or_default()),
+            runtime: runtime
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            turn_status: turn_status
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        };
+        agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 pub fn run() {
@@ -1256,8 +1286,11 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
+        .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                if let Some(sessions) = app.try_state::<PromptSessionState>() {
+                    sessions.shutdown(std::time::Duration::from_millis(600));
+                }
                 agent_doctor_prompt::shutdown_warm_sessions();
                 agent_doctor_cluster::shutdown_managed_cluster();
             }

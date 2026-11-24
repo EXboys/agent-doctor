@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use super::control::PromptSessionControl;
-use super::util::{force_stop_child, join_reader, push_capped};
+use super::util::{force_stop_child, join_reader, push_capped, read_lossy_lines};
 
 /// More than this and the oldest parked process is closed.
 const MAX_WARM: usize = 3;
@@ -81,6 +81,15 @@ impl LivePipes {
         }
     }
 
+    /// `true` once the stdout reader reached EOF. On Windows an outer `cmd` /
+    /// `node` wrapper can briefly outlive the inner `codex.exe` that closed
+    /// stdout; a dead stdout pipe can never serve another JSON-RPC turn.
+    pub(crate) fn stdout_closed(&self) -> bool {
+        self.handles
+            .first()
+            .is_some_and(|handle| handle.is_finished())
+    }
+
     /// Drop what the previous turn left behind before a new turn reads.
     fn reset(&self) {
         let _ = self.drain();
@@ -95,9 +104,7 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
     acc: Arc<Mutex<String>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(pipe);
-        for line in reader.lines().map_while(Result::ok) {
+        read_lossy_lines(pipe, |line| {
             // Capturing is best-effort: a failure here must not take the
             // reader thread down, or the turn loses its output and its EOF.
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -106,7 +113,7 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
             if let Ok(mut guard) = queue.lock() {
                 guard.push((is_stdout, line));
             }
-        }
+        });
     })
 }
 
@@ -210,7 +217,7 @@ pub(crate) fn take(
         pool.remove(index)
     };
     let mut process = found;
-    let alive = matches!(process.child.try_wait(), Ok(None));
+    let alive = matches!(process.child.try_wait(), Ok(None)) && !process.pipes.stdout_closed();
     if !alive || process.fingerprint != fingerprint {
         retire(process.child, process.stdin, process.pipes);
         return None;
@@ -592,5 +599,70 @@ for line in sys.stdin:
         std::fs::write(&config, "model = \"a\"").unwrap();
         cmd.env("OPENAI_BASE_URL", "https://b");
         assert_ne!(base, fingerprint(&cmd, std::slice::from_ref(&config)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_dead_warm_server_transparently_resumes_on_a_fresh_process() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let script = r#"#!/usr/bin/env python3
+import json, os, sys
+
+turns = 0
+for raw in sys.stdin:
+    msg = json.loads(raw)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"id": msg["id"], "result": {"userAgent": "fake"}}), flush=True)
+    elif method in ("thread/start", "thread/resume"):
+        tid = msg["params"].get("threadId") or "thr_recover"
+        print(json.dumps({"id": msg["id"], "result": {"thread": {"id": tid}}}), flush=True)
+    elif method == "turn/start":
+        turns += 1
+        if turns == 2:
+            # Simulate a parked server dying right when the next turn arrives.
+            sys.exit(1)
+        print(json.dumps({"id": msg["id"], "result": {"turn": {"id": f"t{turns}"}}}), flush=True)
+        text = f"pid={os.getpid()} turn={turns}"
+        print(json.dumps({
+            "method": "item/completed",
+            "params": {"item": {"id": f"i{turns}", "type": "agentMessage", "text": text}}
+        }), flush=True)
+        print(json.dumps({"method": "turn/completed", "params": {"turn": {"id": f"t{turns}"}}}), flush=True)
+"#;
+        let bin = write_fake_bin(dir.path(), "fake-codex-crash", script);
+        std::env::set_var("AGENT_DOCTOR_CODEX_BIN", &bin);
+        enable_warm_sessions();
+
+        let (first, first_reply) = ask(
+            &CodexAskBackend,
+            "codex",
+            dir.path(),
+            None,
+            PromptSessionCancel::new(),
+        );
+        assert_eq!(first.status, PromptSessionStatus::Succeeded);
+        assert_eq!(first.runtime_thread_id.as_deref(), Some("thr_recover"));
+
+        let (second, second_reply) = ask(
+            &CodexAskBackend,
+            "codex",
+            dir.path(),
+            first.runtime_thread_id.clone(),
+            PromptSessionCancel::new(),
+        );
+        assert_eq!(
+            second.status,
+            PromptSessionStatus::Succeeded,
+            "{}",
+            second.summary
+        );
+        assert_eq!(second.runtime_thread_id.as_deref(), Some("thr_recover"));
+        assert_ne!(pid_of(&first_reply), pid_of(&second_reply));
+
+        shutdown_warm_sessions();
+        disable_for_test();
+        std::env::remove_var("AGENT_DOCTOR_CODEX_BIN");
     }
 }

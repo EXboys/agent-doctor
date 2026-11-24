@@ -163,7 +163,7 @@ fn mcp_status_blocking(
 }
 
 #[tauri::command]
-pub fn mcp_configure_command(
+pub async fn mcp_configure_command(
     app: AppHandle,
     runtime: String,
     port: Option<u16>,
@@ -171,193 +171,210 @@ pub fn mcp_configure_command(
     user_data_dir: Option<String>,
     profile_directory: Option<String>,
 ) -> Result<McpConfigureReport, String> {
-    let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
-    // Default: show browser UI (headed). Pass headless=true to hide the window.
-    let headless = headless.unwrap_or(false);
-    let emit = |stage: &str, message: &str, done: bool, ok: bool| {
-        let _ = app.emit(
-            "mcp-progress",
-            &McpProgressEvent {
-                stage: stage.to_string(),
-                message: message.to_string(),
-                done,
-                ok,
-            },
+    tauri::async_runtime::spawn_blocking(move || {
+        let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
+        // Default: show browser UI (headed). Pass headless=true to hide the window.
+        let headless = headless.unwrap_or(false);
+        let emit = |stage: &str, message: &str, done: bool, ok: bool| {
+            let _ = app.emit(
+                "mcp-progress",
+                &McpProgressEvent {
+                    stage: stage.to_string(),
+                    message: message.to_string(),
+                    done,
+                    ok,
+                },
+            );
+        };
+
+        emit("discover", "Looking for Chrome…", false, true);
+        let discovery = discover_chrome().map_err(|error| {
+            emit("discover", &error.to_string(), true, false);
+            error.to_string()
+        })?;
+
+        emit(
+            "binary",
+            &format!("Resolving agent-doctor binary for {runtime}…"),
+            false,
+            true,
         );
-    };
+        let binary = resolve_agent_doctor_binary().map_err(|error| {
+            emit("binary", &error.to_string(), true, false);
+            error.to_string()
+        })?;
 
-    emit("discover", "Looking for Chrome…", false, true);
-    let discovery = discover_chrome().map_err(|error| {
-        emit("discover", &error.to_string(), true, false);
-        error.to_string()
-    })?;
+        let workspaces = load_workspaces().unwrap_or_default();
+        let active_entry = workspaces
+            .active
+            .as_ref()
+            .and_then(|name| workspaces.workspaces.get(name));
+        let project_path = active_entry.map(|entry| entry.path.clone());
+        let codex_home = active_entry.map(|entry| entry.codex_home.clone());
+        let explicit_dir = user_data_dir
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let resolved_dir =
+            resolve_user_data_dir(explicit_dir.as_ref(), Some(&discovery.binary_path));
+        let resolved_profile = resolve_profile_directory(profile_directory.as_deref());
 
-    emit(
-        "binary",
-        &format!("Resolving agent-doctor binary for {runtime}…"),
-        false,
-        true,
-    );
-    let binary = resolve_agent_doctor_binary().map_err(|error| {
-        emit("binary", &error.to_string(), true, false);
-        error.to_string()
-    })?;
+        emit(
+            "write",
+            &format!("Writing MCP config for {runtime}…"),
+            false,
+            true,
+        );
+        let options = McpConfigureOptions {
+            runtime: runtime.clone(),
+            port,
+            headless,
+            user_data_dir: Some(resolved_dir),
+            profile_directory: Some(resolved_profile),
+            binary: binary.clone(),
+            project_path,
+            codex_home,
+            hermes_home: active_entry.map(|entry| {
+                std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_default()
+                    .join(".hermes/profiles")
+                    .join(&entry.hermes_profile)
+            }),
+            openclaw_workspace: active_entry.map(|entry| entry.openclaw_workspace.clone()),
+        };
+        configure_for(&discovery, &options).map_err(|error| {
+            emit("write", &error.to_string(), true, false);
+            error.to_string()
+        })?;
 
-    let workspaces = load_workspaces().unwrap_or_default();
-    let active_entry = workspaces
-        .active
-        .as_ref()
-        .and_then(|name| workspaces.workspaces.get(name));
-    let project_path = active_entry.map(|entry| entry.path.clone());
-    let codex_home = active_entry.map(|entry| entry.codex_home.clone());
-    let explicit_dir = user_data_dir
-        .as_ref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-    let resolved_dir = resolve_user_data_dir(explicit_dir.as_ref(), Some(&discovery.binary_path));
-    let resolved_profile = resolve_profile_directory(profile_directory.as_deref());
+        let config_path = agent_doctor_mcp::mcp_servers_path_with_openclaw(
+            &runtime,
+            options.project_path.as_deref(),
+            options.codex_home.as_deref(),
+            options.hermes_home.as_deref(),
+            options.openclaw_workspace.as_deref(),
+        )
+        .map_err(|error| error.to_string())?;
 
-    emit(
-        "write",
-        &format!("Writing MCP config for {runtime}…"),
-        false,
-        true,
-    );
-    let options = McpConfigureOptions {
-        runtime: runtime.clone(),
-        port,
-        headless,
-        user_data_dir: Some(resolved_dir),
-        profile_directory: Some(resolved_profile),
-        binary: binary.clone(),
-        project_path,
-        codex_home,
-        hermes_home: active_entry.map(|entry| {
-            std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .map(std::path::PathBuf::from)
-                .unwrap_or_default()
-                .join(".hermes/profiles")
-                .join(&entry.hermes_profile)
-        }),
-        openclaw_workspace: active_entry.map(|entry| entry.openclaw_workspace.clone()),
-    };
-    configure_for(&discovery, &options).map_err(|error| {
-        emit("write", &error.to_string(), true, false);
-        error.to_string()
-    })?;
+        emit(
+            "done",
+            &format!("Browser MCP configured for {runtime}. Restart the runtime to apply."),
+            true,
+            true,
+        );
 
-    let config_path = agent_doctor_mcp::mcp_servers_path_with_openclaw(
-        &runtime,
-        options.project_path.as_deref(),
-        options.codex_home.as_deref(),
-        options.hermes_home.as_deref(),
-        options.openclaw_workspace.as_deref(),
-    )
-    .map_err(|error| error.to_string())?;
-
-    emit(
-        "done",
-        &format!("Browser MCP configured for {runtime}. Restart the runtime to apply."),
-        true,
-        true,
-    );
-
-    Ok(McpConfigureReport {
-        runtime,
-        port,
-        config_path: config_path.display().to_string(),
-        binary: binary.display().to_string(),
+        Ok(McpConfigureReport {
+            runtime,
+            port,
+            config_path: config_path.display().to_string(),
+            binary: binary.display().to_string(),
+        })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Diagnose Chrome / CLI / installed agents, then write Browser MCP into each installed target.
 #[tauri::command]
-pub fn mcp_diagnose_wire_command(
+pub async fn mcp_diagnose_wire_command(
     app: AppHandle,
     port: Option<u16>,
     headless: Option<bool>,
     user_data_dir: Option<String>,
     profile_directory: Option<String>,
 ) -> Result<BrowserMcpDiagnoseWireReport, String> {
-    let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
-    let headless = headless.unwrap_or(false);
-    let emit = |stage: &str, message: &str, done: bool, ok: bool| {
-        let _ = app.emit(
-            "mcp-progress",
-            &McpProgressEvent {
-                stage: stage.to_string(),
-                message: message.to_string(),
-                done,
-                ok,
-            },
+    tauri::async_runtime::spawn_blocking(move || {
+        let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
+        let headless = headless.unwrap_or(false);
+        let emit = |stage: &str, message: &str, done: bool, ok: bool| {
+            let _ = app.emit(
+                "mcp-progress",
+                &McpProgressEvent {
+                    stage: stage.to_string(),
+                    message: message.to_string(),
+                    done,
+                    ok,
+                },
+            );
+        };
+
+        emit(
+            "diagnose",
+            "Diagnosing Chrome, CLI, and installed agents…",
+            false,
+            true,
         );
-    };
 
-    emit(
-        "diagnose",
-        "Diagnosing Chrome, CLI, and installed agents…",
-        false,
-        true,
-    );
+        let binary = resolve_agent_doctor_binary().unwrap_or_default();
+        let mut options = browser_mcp_wire_options_for_active_workspace(binary);
+        options.port = port;
+        options.headless = headless;
+        let explicit_dir = user_data_dir
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        options.user_data_dir = explicit_dir;
+        options.profile_directory = profile_directory
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
 
-    let binary = resolve_agent_doctor_binary().unwrap_or_default();
-    let mut options = browser_mcp_wire_options_for_active_workspace(binary);
-    options.port = port;
-    options.headless = headless;
-    let explicit_dir = user_data_dir
-        .as_ref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-    options.user_data_dir = explicit_dir;
-    options.profile_directory = profile_directory
-        .as_ref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-
-    let report = diagnose_and_wire_browser_mcp(options);
-    let ok = report.failed == 0 && report.chrome_ok && report.cli_ok;
-    let summary = if report.wrote > 0 {
-        format!(
-            "Wrote Browser MCP into {} agent(s); skipped {}; failed {}.",
-            report.wrote, report.skipped, report.failed
-        )
-    } else if !report.issues.is_empty() {
-        report.issues[0].message.clone()
-    } else {
-        "No installed agents to write.".into()
-    };
-    emit("done", &summary, true, ok);
-    Ok(report)
+        let report = diagnose_and_wire_browser_mcp(options);
+        let ok = report.failed == 0 && report.chrome_ok && report.cli_ok;
+        let summary = if report.wrote > 0 {
+            format!(
+                "Wrote Browser MCP into {} agent(s); skipped {}; failed {}.",
+                report.wrote, report.skipped, report.failed
+            )
+        } else if !report.issues.is_empty() {
+            report.issues[0].message.clone()
+        } else {
+            "No installed agents to write.".into()
+        };
+        emit("done", &summary, true, ok);
+        Ok(report)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn mount_synced_skills_command(
+pub async fn mount_synced_skills_command(
     skill_ids: Option<Vec<String>>,
     runtimes: Option<Vec<String>>,
 ) -> Result<SkillMountReport, String> {
-    mount_synced_skills(&SkillMountOptions {
-        skill_ids: skill_ids.unwrap_or_default(),
-        runtimes: runtimes.unwrap_or_default(),
-        include_active_workspace: true,
+    tauri::async_runtime::spawn_blocking(move || {
+        mount_synced_skills(&SkillMountOptions {
+            skill_ids: skill_ids.unwrap_or_default(),
+            runtimes: runtimes.unwrap_or_default(),
+            include_active_workspace: true,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn unmount_synced_skills_command(
+pub async fn unmount_synced_skills_command(
     skill_ids: Option<Vec<String>>,
     runtimes: Option<Vec<String>>,
 ) -> Result<SkillMountReport, String> {
-    unmount_synced_skills(&SkillMountOptions {
-        skill_ids: skill_ids.unwrap_or_default(),
-        runtimes: runtimes.unwrap_or_default(),
-        include_active_workspace: true,
+    tauri::async_runtime::spawn_blocking(move || {
+        unmount_synced_skills(&SkillMountOptions {
+            skill_ids: skill_ids.unwrap_or_default(),
+            runtimes: runtimes.unwrap_or_default(),
+            include_active_workspace: true,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

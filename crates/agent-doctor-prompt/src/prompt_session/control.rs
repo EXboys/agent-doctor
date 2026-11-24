@@ -657,7 +657,7 @@ impl PromptSessionControl {
         self.stdin.lock().ok().and_then(|mut guard| guard.take())
     }
 
-    pub(crate) fn close(&self) {
+    pub fn close(&self) {
         if let Ok(mut guard) = self.stdin.lock() {
             *guard = None;
         }
