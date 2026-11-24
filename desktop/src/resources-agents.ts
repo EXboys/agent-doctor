@@ -11,7 +11,7 @@ import {
   type AgentCatalogGroupId,
   type AgentCatalogTabId,
 } from "./agent-catalog-groups";
-import { experimentalInstallFailure, installDoneSentence, installFailureSentenceFor, withErrorDetail } from "./friendly-error";
+import { errorDetail, installDoneSentence, installFailureSentenceFor, withErrorDetail } from "./friendly-error";
 import { isAskRuntimeId, runtimeCatalog, DOCTOR_RUNTIME_ID } from "./runtime-catalog";
 import type { InstallProgressEvent, RuntimeDoctorResult } from "./types";
 import {
@@ -161,6 +161,11 @@ function renderAgentRow(runtime: RuntimeDoctorResult): HTMLLIElement {
   const saved = agentInstallHint.get(runtime.id);
   hint.hidden = !saved;
   hint.textContent = saved ?? "";
+  if (!saved && runtime.id === "antigravity" && runtime.incomplete_install) {
+    hint.hidden = false;
+    hint.textContent = t("runtime.antigravityDesktopNeedsCli");
+    hint.classList.add("is-warn");
+  }
   body.append(titleRow, desc, hint);
 
   const metaWrap = document.createElement("div");
@@ -435,10 +440,7 @@ export async function installCatalogAgent(runtime: string): Promise<void> {
     }
     await loadDoctor();
   } catch (error) {
-    const message = isExperimentalRuntime(runtime)
-      ? experimentalInstallFailure(runtime)
-      : withErrorDetail(t("runtime.installFailed"), error);
-    setAgentInstallHint(runtime, message, "error");
+    setAgentInstallHint(runtime, installFailureSentenceFor(runtime, errorDetail(error)), "error");
   } finally {
     agentInstallInFlight.delete(runtime);
     unlisten();

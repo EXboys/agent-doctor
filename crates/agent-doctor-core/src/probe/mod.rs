@@ -334,6 +334,10 @@ fn enforce_dual_install_bundle(
         "workbuddy" => crate::adapters::workbuddy_missing_install_part(),
         "qoder" => crate::adapters::qoder_missing_install_part(),
         "cursor" => crate::adapters::cursor_missing_install_part(),
+        // A desktop app or an IDE launcher named `agy` is not the CLI.
+        "antigravity" if crate::adapters::agy_cli_path().is_some() => None,
+        "antigravity" => crate::adapters::antigravity_missing_install_part()
+            .or(Some("Antigravity 命令行还没装。")),
         _ => None,
     };
     let Some(reason) = missing else {

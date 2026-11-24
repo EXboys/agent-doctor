@@ -214,6 +214,8 @@ export const en = {
     "runtime.installFailedHermes": "Install failed. This one is still experimental, and its installer has to reach a site outside China.",
     "runtime.installFailMissingApp": "The command line is installed, but the desktop app did not finish. Tap Install again to finish it.",
     "runtime.installFailMissingCli": "The desktop app is on this computer, but the command line did not finish. Tap Install again to finish it.",
+    "runtime.installFailMissingCliNetwork": "The desktop app is already on this computer, but the command line could not reach the install address. Check the network, then tap Install again.",
+    "runtime.antigravityDesktopNeedsCli": "The Antigravity desktop app is already on this computer. The command line is still missing. Tap Install to add it.",
     "runtime.installAlready": "Already installed.",
     "runtime.installLogHint": "You can open the install log for details.",
     "runtime.openInstallLog": "Open install log",

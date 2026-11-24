@@ -2,8 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
-import { isExperimentalRuntime } from "./agent-catalog-groups";
-import { experimentalInstallFailure, installDoneSentence, installFailureSentenceFor, withErrorDetail } from "./friendly-error";
+import { errorDetail, installDoneSentence, installFailureSentenceFor, withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import type { DoctorReport, InstallProgressEvent } from "./types";
 import { installRuntime, uninstallRuntime as uninstallRuntimeCommand } from "./ipc";
@@ -267,9 +266,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       await deps.refresh();
       setStickyInstallHint(runtime, stickyHtml, stickyText);
     } catch (error) {
-      const message = isExperimentalRuntime(runtime)
-        ? experimentalInstallFailure(runtime)
-        : withErrorDetail(t("runtime.installFailed"), error);
+      const message = installFailureSentenceFor(runtime, errorDetail(error));
       setStickyInstallHint(runtime, null, message);
       try {
         await deps.refresh();

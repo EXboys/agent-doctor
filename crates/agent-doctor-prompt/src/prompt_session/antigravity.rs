@@ -81,7 +81,12 @@ fn run_antigravity(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| agy_cli_path().map(|path| path.display().to_string()))
-        .ok_or_else(|| anyhow::Error::msg(AGY_MISSING))?;
+        .ok_or_else(|| {
+            anyhow::Error::msg(
+                agent_doctor_core::adapters::antigravity_missing_install_part()
+                    .unwrap_or(AGY_MISSING),
+            )
+        })?;
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let resume_session_id = options
         .resume_thread_id

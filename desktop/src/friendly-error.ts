@@ -27,20 +27,26 @@ export function installDoneSentence(runtime: string, update: boolean): string {
   return t("runtime.installOk");
 }
 
+function installLooksLikeNetwork(detail: string): boolean {
+  return /claude\.ai|chatgpt\.com|enotfound|econnrefused|etimedout|timed?\s*out|timeout|could not resolve|could not connect|internet connection|failed to download|connection refused|firewall|curl: \([0-9]+\)|network|dns|连不上|网络|下载不下来/.test(
+    detail.toLowerCase(),
+  );
+}
+
 /** Install failures stay one sentence. The log button still holds the raw output. */
 export function installFailureSentence(detail: string): string {
-  const lower = detail.toLowerCase();
+  const desktopCliMissing =
+    detail.includes("桌面软件已在本机") && detail.includes("命令行还没装");
+  if (desktopCliMissing && installLooksLikeNetwork(detail)) {
+    return t("runtime.installFailMissingCliNetwork");
+  }
   if (detail.includes("桌面软件还没装")) {
     return t("runtime.installFailMissingApp");
   }
-  if (detail.includes("桌面软件已在本机") && detail.includes("命令行还没装")) {
+  if (desktopCliMissing) {
     return t("runtime.installFailMissingCli");
   }
-  if (
-    /claude\.ai|chatgpt\.com|enotfound|econnrefused|etimedout|timed?\s*out|timeout|could not resolve|connection refused|curl: \([0-9]+\)|network|dns|连不上|网络/.test(
-      lower,
-    )
-  ) {
+  if (installLooksLikeNetwork(detail)) {
     return t("runtime.installFailNetwork");
   }
   return t("runtime.installFailed");

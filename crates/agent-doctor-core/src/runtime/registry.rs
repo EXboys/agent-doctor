@@ -5,8 +5,8 @@ use serde::Serialize;
 
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
-    cursor_cli_path, AntigravityAdapter, ClaudeCodeAdapter, CodexAdapter, CursorAdapter,
-    DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter, PiAdapter, QoderAdapter,
+    agy_cli_path, cursor_cli_path, AntigravityAdapter, ClaudeCodeAdapter, CodexAdapter,
+    CursorAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter, PiAdapter, QoderAdapter,
     WorkbuddyAdapter, ZcodeAdapter,
 };
 use crate::config_syntax::{apply_config_syntax_repair, suggest_config_syntax_repairs};
@@ -435,7 +435,15 @@ fn open_antigravity_session(
     prompt: Option<&str>,
     _prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
-    open_in_terminal("antigravity", &["agy"], cwd, prompt)
+    let Some(path) = agy_cli_path() else {
+        anyhow::bail!(
+            "{}",
+            crate::adapters::antigravity_missing_install_part()
+                .unwrap_or("这台电脑还没装 Antigravity。先在助手列表里点安装。")
+        );
+    };
+    let owned = path.to_string_lossy().into_owned();
+    open_in_terminal("antigravity", &[&owned], cwd, prompt)
 }
 
 fn open_pi_session(

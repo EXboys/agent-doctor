@@ -655,6 +655,7 @@ fn dual_install_partial_reason(runtime_id: &str) -> Option<&'static str> {
         "workbuddy" => crate::adapters::workbuddy_missing_install_part(),
         "qoder" => crate::adapters::qoder_missing_install_part(),
         "cursor" => crate::adapters::cursor_missing_install_part(),
+        "antigravity" => crate::adapters::antigravity_missing_install_part(),
         _ => None,
     }?;
     (reason.contains("已装好") || reason.contains("已在本机")).then_some(reason)

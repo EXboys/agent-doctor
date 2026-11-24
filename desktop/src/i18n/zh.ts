@@ -216,6 +216,8 @@ export const zh = {
     "runtime.installFailedHermes": "安装失败。这个还在试验，安装时要连国外网站。",
     "runtime.installFailMissingApp": "命令行已装好，但桌面软件没装完。再点一次安装即可补装。",
     "runtime.installFailMissingCli": "桌面软件已在本机，但命令行没装完。再点一次安装即可补装。",
+    "runtime.installFailMissingCliNetwork": "桌面软件已在本机，但命令行连不上安装地址。请检查网络后再点一次安装。",
+    "runtime.antigravityDesktopNeedsCli": "这台电脑已经有 Antigravity 桌面软件，还差命令行。点安装补上。",
     "runtime.installAlready": "已安装，无需操作。",
     "runtime.installLogHint": "可打开安装日志查看详情。",
     "runtime.openInstallLog": "打开安装日志",

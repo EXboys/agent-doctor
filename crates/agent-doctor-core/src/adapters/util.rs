@@ -906,12 +906,16 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".claude/local"));
         dirs.push(home.join(".hermes/bin"));
         dirs.push(home.join("AppData/Local/hermes"));
+        // Official Antigravity CLI on Windows. The installer writes the user
+        // PATH, which an already-open app does not see.
+        dirs.push(home.join("AppData/Local/agy/bin"));
         #[cfg(windows)]
         {
             dirs.push(home.join(r"AppData\Roaming\npm"));
             dirs.push(home.join(r"AppData\Local\Programs\nodejs"));
             dirs.push(home.join(r"AppData\Local\codebuddy\bin"));
             dirs.push(home.join(r"AppData\Local\hermes"));
+            dirs.push(home.join(r"AppData\Local\agy\bin"));
             dirs.push(home.join(r"scoop\shims"));
             dirs.push(home.join(r".local\bin"));
         }
@@ -936,6 +940,9 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
         }
         if let Ok(nvm_home) = std::env::var("NVM_HOME") {
             dirs.push(PathBuf::from(nvm_home));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(local).join("agy").join("bin"));
         }
     }
 
@@ -1395,6 +1402,13 @@ mod tests {
             dirs.iter()
                 .any(|d| d.ends_with(".claude/local") || d.ends_with(r".claude\local")),
             "expected a …/.claude/local entry, got {dirs:?}"
+        );
+        assert!(
+            dirs.iter().any(|d| {
+                let text = d.to_string_lossy().replace('\\', "/");
+                text.ends_with("AppData/Local/agy/bin")
+            }),
+            "expected the Antigravity CLI directory, got {dirs:?}"
         );
         #[cfg(not(windows))]
         assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));

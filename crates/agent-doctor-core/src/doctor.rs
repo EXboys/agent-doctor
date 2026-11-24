@@ -100,6 +100,7 @@ fn runtime_incomplete_install(id: &str, installed: bool) -> bool {
         "workbuddy" => crate::adapters::workbuddy_missing_install_part().is_some(),
         "qoder" => crate::adapters::qoder_missing_install_part().is_some(),
         "cursor" => crate::adapters::cursor_missing_install_part().is_some(),
+        "antigravity" => crate::adapters::antigravity_missing_install_part().is_some(),
         _ => false,
     }
 }
