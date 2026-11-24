@@ -1,3 +1,4 @@
+mod antigravity;
 mod claude_code;
 mod codex;
 mod cursor;
@@ -10,6 +11,10 @@ pub mod util;
 mod workbuddy;
 mod zcode;
 
+pub use antigravity::{
+    agy_cli_path, antigravity_settings_path, disable_gemini_key_provider,
+    enable_gemini_key_provider, AntigravityAdapter, ANTIGRAVITY_RUNTIME_ID,
+};
 pub use claude_code::{ClaudeCodeAdapter, CLAUDE_CODE_NPM_PACKAGE};
 pub use codex::{CodexAdapter, CODEX_NPM_PACKAGE};
 pub(crate) use cursor::cursor_desktop_installs;

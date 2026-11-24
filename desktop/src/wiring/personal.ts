@@ -347,6 +347,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "cursor") return t("native.cursor");
     if (runtimeId === "workbuddy") return t("native.workbuddy");
     if (runtimeId === "zcode") return t("native.zcode");
+    if (runtimeId === "antigravity") return t("native.antigravity");
     return t("native.claude");
   }
 
@@ -356,6 +357,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "cursor") return "Cursor";
     if (runtimeId === "workbuddy") return "WorkBuddy";
     if (runtimeId === "zcode") return "ZCode";
+    if (runtimeId === "antigravity") return "Antigravity";
     return "Claude Code";
   }
 
@@ -365,6 +367,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "cursor") return t("native.chipCursor");
     if (runtimeId === "workbuddy") return t("native.chipWorkbuddy");
     if (runtimeId === "zcode") return t("native.chipZcode");
+    if (runtimeId === "antigravity") return t("native.chipAntigravity");
     return t("native.chipClaude");
   }
 
@@ -374,6 +377,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "cursor") return t("native.loginCursor");
     if (runtimeId === "workbuddy") return t("native.loginWorkbuddy");
     if (runtimeId === "zcode") return t("native.loginZcode");
+    if (runtimeId === "antigravity") return t("native.loginAntigravity");
     return t("native.loginClaude");
   }
 
@@ -403,6 +407,7 @@ export function createPersonalController(deps: PersonalDeps) {
         if (result.runtime_id === "cursor") return t("native.missingCursor");
         if (result.runtime_id === "workbuddy") return t("native.missingWorkbuddy");
         if (result.runtime_id === "zcode") return t("native.missingZcode");
+        if (result.runtime_id === "antigravity") return t("native.missingAntigravity");
         return t("native.missingClaude");
       case "no_provider":
         return t("native.noProvider");
@@ -426,6 +431,7 @@ export function createPersonalController(deps: PersonalDeps) {
       "cursor",
       "workbuddy",
       "zcode",
+      "antigravity",
     ]);
     const rows = appState.nativeAccounts.filter(
       (row) => row.visible && MANAGED_NATIVE_IDS.has(row.runtime_id),

@@ -114,13 +114,13 @@ pub use evotown::{
     load_doctor_node_config, load_evotown_config, load_reported_subscriptions, mount_synced_skills,
     normalize_runtime, preferred_runtime_status, reclaim_subscription,
     remember_reported_subscription, resolve_preferred_runtime, resolve_runtime, run_connect_loop,
-    set_preferred_runtime, set_subscription_cap, set_subscription_disabled, set_subscription_proxy,
-    skill_mount_runtime_ids, start_subscription_login, unmount_synced_skills, AssignedJob,
-    ConnectOptions, DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
-    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, RegisterOptions,
-    RegisterReport, ReportedSubscription, SkillAgentUsage, SkillInventoryItem, SkillMountOptions,
-    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SubscriptionPoolRow,
-    SyncOptions, SyncReport,
+    save_gemini_key, set_preferred_runtime, set_subscription_cap, set_subscription_disabled,
+    set_subscription_proxy, skill_mount_runtime_ids, start_subscription_login,
+    unmount_synced_skills, AssignedJob, ConnectOptions, DoctorNodeConfig, EvotownConfig,
+    EvotownHealthReport, EvotownStatus, JobResult, OnboardingOptions, OnboardingReport,
+    PolicyPullReport, PreferredRuntimeStatus, RegisterOptions, RegisterReport,
+    ReportedSubscription, SkillAgentUsage, SkillInventoryItem, SkillMountOptions, SkillMountReport,
+    SkillsInventoryOptions, SkillsInventoryReport, SubscriptionPoolRow, SyncOptions, SyncReport,
 };
 pub use exec::{ExecBackend, ExecOutput, LocalBackend};
 pub use install::{

@@ -174,6 +174,7 @@ pub fn normalize_runtime(raw: &str) -> String {
         "workbuddy" | "codebuddy" => "workbuddy".into(),
         "zcode" | "z-code" => "zcode".into(),
         "pi" | "pi-coding-agent" | "pi_coding_agent" => "pi".into(),
+        "agy" | "antigravity" | "antigravity-cli" => "antigravity".into(),
         other => other.to_string(),
     }
 }
@@ -227,6 +228,59 @@ fn workdir(job: &AssignedJob) -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
+fn apply_gemini_account_env(cmd: &mut Command, job: &AssignedJob) {
+    let Some(name) = crate::evotown::subscription_pool::prefer_account(&job.payload) else {
+        return;
+    };
+    let Ok(env) = crate::evotown::subscription_gemini::env_for_account(&name) else {
+        return;
+    };
+    for key in env.remove {
+        cmd.env_remove(key);
+    }
+    for (key, value) in env.set {
+        cmd.env(key, value);
+    }
+}
+
+pub(crate) fn run_agy_cli(job: &AssignedJob) -> Result<JobResult> {
+    ensure_agy_key_provider(job);
+    let env = load_agent_env();
+    let bin = env
+        .get("AGENT_DOCTOR_AGY_BIN")
+        .cloned()
+        .unwrap_or_else(|| "agy".into());
+    let cwd = workdir(job);
+    let prompt = job.prompt();
+    let mut cmd = crate::exec::command_for_path(Path::new(&bin));
+    cmd.arg("-p")
+        .arg(&prompt)
+        .current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_gemini_account_env(&mut cmd, job);
+    let output = run_command_with_timeout(cmd, job.timeout_sec)?;
+    Ok(command_result(output, "antigravity"))
+}
+
+fn ensure_agy_key_provider(job: &AssignedJob) {
+    let Some(name) = crate::evotown::subscription_pool::prefer_account(&job.payload) else {
+        return;
+    };
+    let Ok(env) = crate::evotown::subscription_gemini::env_for_account(&name) else {
+        return;
+    };
+    if !env
+        .set
+        .iter()
+        .any(|(key, value)| key == "GEMINI_API_KEY" && !value.is_empty())
+    {
+        return;
+    }
+    crate::adapters::enable_gemini_key_provider();
+}
+
 pub(crate) fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
     let env = load_agent_env();
     let bin = env
@@ -253,6 +307,7 @@ pub(crate) fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
     {
         cmd.arg("--dangerously-skip-permissions");
     }
+    apply_gemini_account_env(&mut cmd, job);
     let output = run_command_with_timeout(cmd, job.timeout_sec)?;
     Ok(command_result(output, "claude-code"))
 }
@@ -276,6 +331,7 @@ pub(crate) fn run_codex_cli(job: &AssignedJob) -> Result<JobResult> {
     if job.payload.get("full_auto").and_then(|v| v.as_bool()) == Some(true) {
         cmd.arg("--full-auto");
     }
+    apply_gemini_account_env(&mut cmd, job);
     let output = match run_command_with_timeout(cmd, job.timeout_sec) {
         Ok(out) => out,
         Err(_) => {
@@ -285,6 +341,7 @@ pub(crate) fn run_codex_cli(job: &AssignedJob) -> Result<JobResult> {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            apply_gemini_account_env(&mut cmd2, job);
             run_command_with_timeout(cmd2, job.timeout_sec)?
         }
     };

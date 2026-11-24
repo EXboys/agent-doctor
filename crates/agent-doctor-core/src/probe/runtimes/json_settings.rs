@@ -60,6 +60,15 @@ pub(crate) fn probe_schema_workbuddy(
     probe_json_object_schema(path, parsed, checks, facts, "WorkBuddy");
 }
 
+pub(crate) fn probe_schema_antigravity(
+    path: &Path,
+    parsed: &ParsedConfig,
+    checks: &mut Vec<ProbeCheck>,
+    facts: &mut Vec<DiagnosticFact>,
+) {
+    probe_json_object_schema(path, parsed, checks, facts, "Antigravity");
+}
+
 pub(crate) fn probe_schema_pi(
     path: &Path,
     parsed: &ParsedConfig,

@@ -3,7 +3,7 @@ use agent_doctor_core::{
     delete_personal_provider, execute_personal_provider_setup, list_personal_providers,
     list_subscription_pool, load_mode_status, load_personal_provider_status, native_account_status,
     reclaim_subscription, refresh_account_models, resign_native_subscription,
-    resolve_agent_doctor_binary, set_subscription_cap, set_subscription_disabled,
+    resolve_agent_doctor_binary, save_gemini_key, set_subscription_cap, set_subscription_disabled,
     set_subscription_proxy, sign_out_native_subscription, start_subscription_login,
     switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider, use_current_service,
     use_native_subscription, verify_personal_provider_with_protocol, wire_browser_mcp_installed,
@@ -419,6 +419,22 @@ pub fn set_subscription_proxy_command(
     proxy: Option<String>,
 ) -> Result<SubscriptionPoolRow, String> {
     set_subscription_proxy(&name, proxy).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn save_gemini_key_command(
+    name: String,
+    mode: String,
+    api_key: String,
+    project: String,
+    location: String,
+) -> Result<SubscriptionPoolRow, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_gemini_key(&name, &mode, &api_key, &project, &location)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

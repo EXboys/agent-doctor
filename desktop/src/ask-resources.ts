@@ -73,6 +73,7 @@ export type AskRuntime =
   | "cursor"
   | "workbuddy"
   | "pi"
+  | "antigravity"
   /** Built-in Agent Doctor agent loop (no external CLI). */
   | "doctor";
 

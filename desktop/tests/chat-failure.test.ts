@@ -29,6 +29,7 @@ function assert(cond: boolean, msg: string) {
 async function main() {
   const {
     explainChatFailure,
+    personFacingAssistantText,
     missingProviderFieldsMessage,
     desktopNeedsAnotherLogin,
     cliReadyToUse,
@@ -44,6 +45,18 @@ async function main() {
 
   const anthropic =
     "Unable to connect to Anthropic services Failed to connect to api.anthropic.com: Status 403";
+  const license =
+    "You do not have a valid license of this product. Please contact your administrator to request a license. If you are not an enterprise user and believe you are receiving this message as an error, please try using the latest version and logging in again. (#3501)";
+  const agyRegion = explainChatFailure(license);
+  assert(agyRegion?.kind === "agy_region", "antigravity region refusal is its own failure");
+  const shown = personFacingAssistantText(license);
+  assert(shown.includes("地区"), `region refusal follows the Chinese interface, got ${shown}`);
+  assert(!shown.includes("valid license"), "the English license sentence is not the line on screen");
+  assert(
+    personFacingAssistantText("你好，这是一段正常回答。").includes("正常回答"),
+    "a normal reply stays as written",
+  );
+
   const geo = explainChatFailure(anthropic);
   assert(geo?.kind === "geo_blocked", "anthropic 403 should map to geo_blocked");
 

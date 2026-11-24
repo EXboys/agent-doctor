@@ -5,25 +5,28 @@ use serde::Serialize;
 
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
-    cursor_cli_path, ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter,
-    HermesAdapter, OpenClawAdapter, PiAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
+    cursor_cli_path, AntigravityAdapter, ClaudeCodeAdapter, CodexAdapter, CursorAdapter,
+    DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter, PiAdapter, QoderAdapter,
+    WorkbuddyAdapter, ZcodeAdapter,
 };
 use crate::config_syntax::{apply_config_syntax_repair, suggest_config_syntax_repairs};
 use crate::evotown::{
-    run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook, AssignedJob, JobResult,
+    run_agy_cli, run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook, AssignedJob,
+    JobResult,
 };
 use crate::lifecycle::{
-    run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle,
-    run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle, run_pi_lifecycle,
-    run_qoder_lifecycle, run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction,
+    run_antigravity_lifecycle, run_claude_code_lifecycle, run_codex_lifecycle,
+    run_cursor_lifecycle, run_deepseek_harness_lifecycle, run_hermes_lifecycle,
+    run_openclaw_lifecycle, run_pi_lifecycle, run_qoder_lifecycle, run_workbuddy_lifecycle,
+    run_zcode_lifecycle, AntigravityLifecycleAction, CursorLifecycleAction,
     DeepSeekHarnessLifecycleAction, HermesLifecycleAction, NpmCliLifecycleAction,
     OpenClawLifecycleAction, QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
 };
 use crate::probe::runtimes::{
     claude_code_probe_deep, codex_probe_deep, deepseek_harness_probe_deep, openclaw_probe_deep,
-    probe_deep, probe_deep_noop, schema_claude_code, schema_codex, schema_cursor,
-    schema_deepseek_harness, schema_hermes, schema_openclaw, schema_pi, schema_qoder,
-    schema_workbuddy, schema_zcode,
+    probe_deep, probe_deep_noop, schema_antigravity, schema_claude_code, schema_codex,
+    schema_cursor, schema_deepseek_harness, schema_hermes, schema_openclaw, schema_pi,
+    schema_qoder, schema_workbuddy, schema_zcode,
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
@@ -272,6 +275,7 @@ const HERMES_ENV: &[&str] = &["HERMES", "OPENAI", "ANTHROPIC", "DEEPSEEK", "GOOG
 const DEEPSEEK_HARNESS_ENV: &[&str] = &["DSH", "DEEPSEEK"];
 const QODER_ENV: &[&str] = &["QODER"];
 const PI_ENV: &[&str] = &["PI", "OPENAI", "ANTHROPIC"];
+const ANTIGRAVITY_ENV: &[&str] = &["GEMINI", "GOOGLE"];
 const WORKBUDDY_ENV: &[&str] = &["CODEBUDDY", "WORKBUDDY", "TENCENT"];
 const CURSOR_ENV: &[&str] = &["CURSOR"];
 const ZCODE_ENV: &[&str] = &["ZCODE"];
@@ -302,6 +306,10 @@ fn qoder_adapter() -> Box<dyn RuntimeAdapter> {
 
 fn pi_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(PiAdapter)
+}
+
+fn antigravity_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(AntigravityAdapter)
 }
 
 fn workbuddy_adapter() -> Box<dyn RuntimeAdapter> {
@@ -422,6 +430,14 @@ fn open_qoder_session(
     open_qoder(cwd, prompt)
 }
 
+fn open_antigravity_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("antigravity", &["agy"], cwd, prompt)
+}
+
 fn open_pi_session(
     cwd: &Path,
     prompt: Option<&str>,
@@ -499,6 +515,14 @@ fn run_codex_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
         RuntimeLifecycleAction::Update => NpmCliLifecycleAction::Update,
     };
     run_codex_lifecycle(action)
+}
+
+fn run_antigravity_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => AntigravityLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => AntigravityLifecycleAction::Update,
+    };
+    run_antigravity_lifecycle(action)
 }
 
 fn run_pi_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
@@ -707,6 +731,27 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         open_session: Some(open_pi_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
         dispatch: None,
+        skill_mount: false,
+        browser_mcp: false,
+    },
+    RuntimeDescriptor {
+        id: "antigravity",
+        probe: RuntimeProbeSpec {
+            binary_name: "agy",
+            config_format: ConfigFormat::Json,
+            env_keywords: ANTIGRAVITY_ENV,
+        },
+        create_adapter: antigravity_adapter,
+        schema_probe: Some(schema_antigravity),
+        deep_probe: Some(probe_deep_noop),
+        run_lifecycle: Some(run_antigravity_lifecycle_action),
+        wiring: None,
+        workspace_bind: None,
+        workspace_repairs: &[],
+        label: "Antigravity",
+        open_session: Some(open_antigravity_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: Some(run_agy_cli),
         skill_mount: false,
         browser_mcp: false,
     },
@@ -1039,6 +1084,7 @@ mod tests {
                 "qoder",
                 "workbuddy",
                 "pi",
+                "antigravity",
                 "cursor",
                 "zcode"
             ]
@@ -1259,7 +1305,7 @@ mod tests {
             .is_none());
         assert_eq!(
             dispatch_runtime_ids(),
-            vec!["openclaw", "hermes", "claude-code", "codex"]
+            vec!["openclaw", "hermes", "claude-code", "codex", "antigravity"]
         );
         assert!(RUNTIME_REGISTRY
             .iter()

@@ -32,6 +32,10 @@ pub fn personal_api_key_account(provider_id: &str) -> String {
     format!("personal.{provider_id}.api_key")
 }
 
+pub(crate) fn subscription_gemini_secret_account(name: &str) -> String {
+    format!("subscription.gemini.{name}")
+}
+
 /// Human-readable name of the active secret store (for errors / docs).
 pub fn platform_secret_store_name() -> &'static str {
     if std::env::var("AGENT_DOCTOR_SECRETS_BACKEND")

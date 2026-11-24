@@ -37,6 +37,7 @@ const CLAUDE_ID: &str = "claude-code";
 const QODER_ID: &str = "qoder";
 const CURSOR_ID: &str = "cursor";
 const WORKBUDDY_ID: &str = "workbuddy";
+const ANTIGRAVITY_ID: &str = "antigravity";
 const ZCODE_ID: &str = "zcode";
 const DEEPSEEK_HARNESS_ID: &str = "deepseek-harness";
 const CODEX_LOGIN_URL: &str = "https://auth.openai.com";
@@ -120,7 +121,7 @@ pub struct NativeAccountSwitch {
 pub fn is_native_subscription(runtime_id: &str) -> bool {
     if !matches!(
         runtime_id,
-        CODEX_ID | CLAUDE_ID | QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID
+        CODEX_ID | CLAUDE_ID | QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID | ANTIGRAVITY_ID
     ) || read_mode(runtime_id) != MODE_SUBSCRIPTION
     {
         return false;
@@ -155,7 +156,7 @@ pub fn turn_uses_native_account(
     if !is_native_subscription(runtime_id) {
         return false;
     }
-    if matches!(runtime_id, CURSOR_ID | ZCODE_ID) {
+    if matches!(runtime_id, CURSOR_ID | ZCODE_ID | ANTIGRAVITY_ID) {
         return true;
     }
     if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
@@ -177,7 +178,7 @@ pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
     ];
     // Every installed subscription-capable CLI (or signed-in companion desktop IDE)
     // appears consistently; reachability is checked only when the user taps Sign in.
-    for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID, ZCODE_ID] {
+    for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID, ZCODE_ID, ANTIGRAVITY_ID] {
         if runtime_has_cli_or_headless(runtime_id) || desktop_login_state(runtime_id).0 {
             rows.push(row(runtime_id, true, &provider_name));
         }
@@ -199,6 +200,9 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
     ensure_edition_allows_mode(MODE_PERSONAL)?;
     let runtime_id = known_runtime(runtime_id)?;
     let provider_name = active_provider_name();
+    if runtime_id == ANTIGRAVITY_ID {
+        return use_agy_subscription(provider_name);
+    }
     if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID) {
         return use_cli_subscription(runtime_id, provider_name);
     }
@@ -325,6 +329,15 @@ pub fn use_current_service(runtime_id: &str) -> Result<NativeAccountSwitch> {
             )?;
         }
         CURSOR_ID | ZCODE_ID => {}
+        ANTIGRAVITY_ID => {
+            if agy_url_is_gemini_api(&provider.url) {
+                crate::adapters::enable_gemini_key_provider();
+            } else if agy_url_is_vertex(&provider.url) {
+                crate::adapters::disable_gemini_key_provider();
+            } else {
+                return Ok(switch(runtime_id, true, "unsupported", name));
+            }
+        }
         _ => bail!("unknown runtime"),
     }
     write_mode(runtime_id, "service")?;
@@ -356,7 +369,10 @@ fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountR
     let using = is_native_subscription(runtime_id);
     let is_logged_in = logged_in(runtime_id);
     let (desktop_logged_in, desktop_needs_sync) = desktop_login_state(runtime_id);
-    let installed = if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID) {
+    let installed = if matches!(
+        runtime_id,
+        QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID | ANTIGRAVITY_ID
+    ) {
         runtime_has_cli_or_headless(runtime_id) || desktop_logged_in
     } else if runtime_id == DEEPSEEK_HARNESS_ID {
         extra_account_runtime_installed(runtime_id)
@@ -546,6 +562,7 @@ fn known_runtime(runtime_id: &str) -> Result<&'static str> {
         CURSOR_ID => Ok(CURSOR_ID),
         WORKBUDDY_ID => Ok(WORKBUDDY_ID),
         ZCODE_ID => Ok(ZCODE_ID),
+        ANTIGRAVITY_ID => Ok(ANTIGRAVITY_ID),
         other => bail!("subscription login is only for an official command line, not {other}"),
     }
 }
@@ -555,6 +572,7 @@ fn cli_binary(runtime_id: &str) -> Option<PathBuf> {
         QODER_ID => crate::adapters::qoder_cli_path(),
         CURSOR_ID => crate::adapters::cursor_cli_path(),
         WORKBUDDY_ID => crate::adapters::workbuddy_cli_path(),
+        ANTIGRAVITY_ID => crate::adapters::agy_cli_path(),
         _ => None,
     }
 }
@@ -626,6 +644,77 @@ fn use_zcode_subscription(provider_name: String) -> Result<NativeAccountSwitch> 
         return Ok(switch(ZCODE_ID, true, "using", provider_name));
     }
     Ok(switch(ZCODE_ID, false, "login_incomplete", provider_name))
+}
+
+fn agy_url_is_gemini_api(url: &str) -> bool {
+    url.to_ascii_lowercase()
+        .contains("generativelanguage.googleapis.com")
+}
+
+fn agy_url_is_vertex(url: &str) -> bool {
+    url.to_ascii_lowercase()
+        .contains("aiplatform.googleapis.com")
+}
+
+/// One Google login on this computer. The command is `agy acp --login`.
+fn use_agy_subscription(provider_name: String) -> Result<NativeAccountSwitch> {
+    let Some(binary) = crate::adapters::agy_cli_path() else {
+        return Ok(switch(ANTIGRAVITY_ID, false, "missing_tool", provider_name));
+    };
+    crate::adapters::disable_gemini_key_provider();
+    if agy_logged_in() {
+        write_mode(ANTIGRAVITY_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(ANTIGRAVITY_ID, true, "using", provider_name));
+    }
+    let _ = spawn_agy_login(&binary);
+    if agy_logged_in() {
+        write_mode(ANTIGRAVITY_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(ANTIGRAVITY_ID, true, "using", provider_name));
+    }
+    Ok(switch(
+        ANTIGRAVITY_ID,
+        false,
+        "login_incomplete",
+        provider_name,
+    ))
+}
+
+fn spawn_agy_login(binary: &Path) -> Result<()> {
+    let mut cmd = crate::exec::command_for_path(binary);
+    cmd.args(["acp", "--login"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let open_shim = install_macos_login_open_shim(&mut cmd);
+    let mut child = cmd.spawn()?;
+    let opened = Arc::new(AtomicBool::new(false));
+    if let Some(pipe) = child.stdout.take() {
+        watch_login_output_mode(pipe, Arc::clone(&opened), true);
+    }
+    if let Some(pipe) = child.stderr.take() {
+        watch_login_output_mode(pipe, Arc::clone(&opened), true);
+    }
+    let started = Instant::now();
+    loop {
+        drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+        if agy_logged_in() {
+            wait_for_login_exit(&mut child);
+            return Ok(());
+        }
+        if started.elapsed() > LOGIN_WAIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("login timed out");
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+                return Ok(());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(200)),
+            Err(_) => return Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -909,6 +998,7 @@ fn cli_logged_in(runtime_id: &str) -> bool {
         CURSOR_ID => cursor_logged_in(),
         WORKBUDDY_ID => workbuddy_logged_in(),
         ZCODE_ID => zcode_logged_in(),
+        ANTIGRAVITY_ID => agy_logged_in(),
         DEEPSEEK_HARNESS_ID => dsh_logged_in(),
         _ => false,
     }
@@ -1595,7 +1685,7 @@ fn claude_target_url(url: &str, protocol: &str) -> Option<String> {
 
 fn logged_in(runtime_id: &str) -> bool {
     match runtime_id {
-        QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID | DEEPSEEK_HARNESS_ID => {
+        QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID | ANTIGRAVITY_ID | DEEPSEEK_HARNESS_ID => {
             cli_logged_in(runtime_id)
         }
         CODEX_ID => {
@@ -1672,6 +1762,100 @@ fn macos_keychain_has_cursor_auth() -> bool {
     !using_test_home()
         && (macos_keychain_item_exists("cursor-access-token", Some("cursor-user"))
             || macos_keychain_item_exists("cursor-api-key", Some("cursor-user")))
+}
+
+/// The CLI stores the Google login in the OS keyring under this service and account.
+/// Presence is enough. The secret itself is never read.
+const AGY_KEYRING_SERVICE: &str = "gemini";
+const AGY_KEYRING_ACCOUNT: &str = "antigravity";
+
+fn agy_test_login_marker() -> PathBuf {
+    home_join(".gemini/antigravity-cli/auth-present")
+}
+
+fn agy_logged_in() -> bool {
+    if using_test_home() {
+        return agy_test_login_marker().is_file();
+    }
+    agy_keyring_present()
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn agy_keyring_present() -> bool {
+    macos_keychain_item_exists(AGY_KEYRING_SERVICE, Some(AGY_KEYRING_ACCOUNT))
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn agy_keyring_present() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return std::process::Command::new("secret-tool") // raw-spawn-ok
+            .args([
+                "lookup",
+                "service",
+                AGY_KEYRING_SERVICE,
+                "username",
+                AGY_KEYRING_ACCOUNT,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let Ok(output) = std::process::Command::new("cmdkey").arg("/list").output() else {
+            // raw-spawn-ok
+            return false;
+        };
+        let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        return text.contains(AGY_KEYRING_SERVICE) && text.contains(AGY_KEYRING_ACCOUNT);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    false
+}
+
+fn forget_agy_keyring() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("security") // raw-spawn-ok
+            .args([
+                "delete-generic-password",
+                "-s",
+                AGY_KEYRING_SERVICE,
+                "-a",
+                AGY_KEYRING_ACCOUNT,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("secret-tool") // raw-spawn-ok
+            .args([
+                "clear",
+                "service",
+                AGY_KEYRING_SERVICE,
+                "username",
+                AGY_KEYRING_ACCOUNT,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmdkey") // raw-spawn-ok
+            .arg("/delete:gemini:antigravity")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -1848,6 +2032,13 @@ fn forget_saved_login(runtime_id: &str) {
             clear_workbuddy_local_storage(&dir.join("local_storage"));
             let _ = fs::create_dir_all(&dir);
             let _ = fs::write(dir.join(WORKBUDDY_SIGNOUT_MARKER), "signed-out");
+        }
+        ANTIGRAVITY_ID => {
+            let _ = fs::remove_file(agy_test_login_marker());
+            if !using_test_home() {
+                forget_agy_keyring();
+                clear_macos_keychain_cache();
+            }
         }
         ZCODE_ID => {
             if !using_test_home() {
@@ -2385,6 +2576,40 @@ mod tests {
             &json!({"accessToken": "cli-token"})
         ));
         assert!(!cursor_cli_config_is_signed_in(&json!({"version": 1})));
+    }
+
+    #[test]
+    fn antigravity_login_marker_is_only_for_tests() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::adapters::util::with_test_home(dir.path(), || {
+            assert!(!logged_in(ANTIGRAVITY_ID));
+            let marker = agy_test_login_marker();
+            fs::create_dir_all(marker.parent().unwrap()).unwrap();
+            fs::write(&marker, "1").unwrap();
+            assert!(logged_in(ANTIGRAVITY_ID));
+            assert!(turn_uses_native_account(
+                ANTIGRAVITY_ID,
+                Some("gemini-3-flash"),
+                Some("native:antigravity"),
+            ));
+            assert!(!turn_uses_native_account(
+                ANTIGRAVITY_ID,
+                Some("gemini-3-flash"),
+                Some("saved-key"),
+            ));
+            forget_saved_login(ANTIGRAVITY_ID);
+            assert!(!logged_in(ANTIGRAVITY_ID));
+        });
+    }
+
+    #[test]
+    fn gemini_and_vertex_addresses_can_back_antigravity() {
+        assert!(agy_url_is_gemini_api(
+            "https://generativelanguage.googleapis.com/v1beta/openai/"
+        ));
+        assert!(agy_url_is_vertex("https://aiplatform.googleapis.com/v1"));
+        assert!(!agy_url_is_gemini_api("https://api.deepseek.com/v1"));
+        assert!(!agy_url_is_vertex("https://api.deepseek.com/v1"));
     }
 
     #[test]

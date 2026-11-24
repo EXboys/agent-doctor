@@ -6,6 +6,7 @@ mod jobs;
 mod policy;
 mod preferred_runtime;
 mod register;
+mod subscription_gemini;
 mod subscription_login;
 mod subscription_pool;
 mod sync;
@@ -31,7 +32,9 @@ pub use jobs::{
     execute_job, is_known_dispatch_runtime, known_dispatch_runtimes, normalize_runtime,
     resolve_runtime, AssignedJob, JobResult,
 };
-pub(crate) use jobs::{run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook};
+pub(crate) use jobs::{
+    run_agy_cli, run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook,
+};
 pub use policy::{execute_policy_pull, PolicyPullReport};
 pub use preferred_runtime::{
     preferred_runtime_status, read_preferred_runtime_from_env_file, resolve_preferred_runtime,
@@ -41,6 +44,7 @@ pub use register::{
     execute_register, resolve_engine_type, RegisterOptions, RegisterReport,
     BOOTSTRAP_INGEST_TOKEN_ENV, ENGINE_ID_ENV, ENGINE_INGEST_TOKEN_ENV,
 };
+pub use subscription_gemini::save_gemini_key;
 pub use subscription_login::start_subscription_login;
 pub use subscription_pool::{
     forget_reported_subscription, list_subscription_pool, load_reported_subscriptions,

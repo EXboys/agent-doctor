@@ -28,6 +28,7 @@ const AGENT_ORDER: readonly string[] = [
   "claude-code",
   "openclaw",
   "pi",
+  "antigravity",
   "cursor",
   "workbuddy",
   "qoder",

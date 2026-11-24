@@ -227,6 +227,18 @@
                       <button id="subscription-empty-codex" type="button" class="btn-secondary btn-compact" data-i18n="pool.signIn">登录</button>
                     </div>
                   </li>
+                  <li class="provider-item">
+                    <span id="subscription-empty-gemini-icon" class="provider-avatar is-brand" aria-hidden="true"></span>
+                    <div class="provider-item-main">
+                      <p class="provider-item-title"><span class="provider-item-name" data-i18n="pool.kindGemini">Gemini 密钥</span></p>
+                      <p class="provider-item-sub">
+                        <span class="provider-item-note" data-i18n="pool.geminiHint">填这个人自己的 Gemini 密钥，或公司的 Cloud 项目。密钥留在这台电脑上。</span>
+                      </p>
+                    </div>
+                    <div class="provider-item-actions">
+                      <button id="subscription-empty-gemini" type="button" class="btn-secondary btn-compact" data-i18n="pool.geminiFill">填写</button>
+                    </div>
+                  </li>
                 </ul>
                 <ul id="subscription-pool-list" class="provider-list subscription-pool-list" aria-live="polite"></ul>
                 <p id="subscription-pool-result" class="section-footnote"></p>
@@ -278,15 +290,36 @@
                   <button id="subscription-login-back" type="button" class="btn-ghost btn-compact" data-i18n="personal.back">返回</button>
                   <h2 data-i18n="pool.addTitle">新增订阅号</h2>
                 </div>
-                <p class="section-footnote" data-i18n="pool.addHint">选一种，写个名字，再登录。登录只留在这个号自己的目录里。</p>
+                <p id="subscription-login-hint" class="section-footnote" data-i18n="pool.addHint">选一种，写个名字，再登录。登录只留在这个号自己的目录里。</p>
                 <div class="subscription-kind-pick" role="group">
                   <button id="subscription-login-claude" type="button" class="subscription-kind" data-runtime="claude-code" aria-pressed="false" data-i18n="pool.kindClaude">Claude Code</button>
                   <button id="subscription-login-codex" type="button" class="subscription-kind" data-runtime="codex" aria-pressed="false" data-i18n="pool.kindCodex">Codex</button>
+                  <button id="subscription-login-gemini" type="button" class="subscription-kind" data-runtime="gemini" aria-pressed="false" data-i18n="pool.kindGemini">Gemini 密钥</button>
                 </div>
                 <label class="field-row" for="subscription-login-name">
                   <span class="field-label" data-i18n="pool.name">名字</span>
                   <input id="subscription-login-name" class="field-input" type="text" maxlength="64" data-i18n-placeholder="pool.namePlaceholder" placeholder="用来认出这个号" />
                 </label>
+                <div id="subscription-login-gemini-fields" hidden>
+                  <div class="subscription-kind-pick" role="group">
+                    <button id="subscription-login-gemini-api" type="button" class="subscription-kind" aria-pressed="true" data-i18n="pool.geminiOwn">自己的密钥</button>
+                    <button id="subscription-login-gemini-cloud" type="button" class="subscription-kind" aria-pressed="false" data-i18n="pool.geminiCloud">公司 Cloud</button>
+                  </div>
+                  <label class="field-row" for="subscription-login-key">
+                    <span class="field-label" data-i18n="pool.geminiKey">密钥</span>
+                    <input id="subscription-login-key" class="field-input" type="password" autocomplete="off" data-i18n-placeholder="pool.geminiKeyPlaceholder" placeholder="粘贴 Gemini 密钥" />
+                  </label>
+                  <div id="subscription-login-cloud-fields" hidden>
+                    <label class="field-row" for="subscription-login-project">
+                      <span class="field-label" data-i18n="pool.geminiProject">项目编号</span>
+                      <input id="subscription-login-project" class="field-input" type="text" autocomplete="off" data-i18n-placeholder="pool.geminiProjectPlaceholder" placeholder="公司的项目编号" />
+                    </label>
+                    <label class="field-row" for="subscription-login-location">
+                      <span class="field-label" data-i18n="pool.geminiLocation">地区</span>
+                      <input id="subscription-login-location" class="field-input" type="text" autocomplete="off" data-i18n-placeholder="pool.geminiLocationPlaceholder" placeholder="global" />
+                    </label>
+                  </div>
+                </div>
                 <button id="subscription-login-start" type="button" class="btn-primary" data-i18n="pool.loginStart">开始登录</button>
                 <p id="subscription-login-result" class="section-footnote" role="status"></p>
               </div>

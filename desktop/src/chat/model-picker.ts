@@ -113,6 +113,8 @@ export function nativeAccountLabel(runtimeId: string): string {
       return t("native.workbuddy");
     case "zcode":
       return t("native.zcode");
+    case "antigravity":
+      return t("native.antigravity");
     case "deepseek-harness":
       return t("native.deepseek");
     default:
@@ -270,6 +272,14 @@ export function runtimeAcceptsProvider(
   opts: { officialSignedIn: boolean; officialLineReady?: boolean },
 ): boolean {
   if (runtime === "cursor" || runtime === "zcode") return false;
+  if (runtime === "antigravity") {
+    if (provider.id === OFFICIAL_PROVIDER_ID) return false;
+    const url = provider.url.toLowerCase();
+    return (
+      url.includes("generativelanguage.googleapis.com") ||
+      url.includes("aiplatform.googleapis.com")
+    );
+  }
   if (provider.id === OFFICIAL_PROVIDER_ID) {
     if (!opts.officialSignedIn) return false;
     if (runtime === "deepseek-harness") return opts.officialLineReady !== false;
@@ -1063,12 +1073,16 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   function renderEmptyMenuHint(runtime: AskRuntime): void {
     const hint = document.createElement("div");
     hint.className = "chat-model-menu-hint";
-    if (runtime === "cursor" || runtime === "zcode") {
+    if (runtime === "cursor" || runtime === "zcode" || runtime === "antigravity") {
       const busy = syncingAccountRuntime === runtime;
       const feedback = syncFeedbackByRuntime.get(runtime) ?? "";
       hint.textContent =
         feedback ||
-        (runtime === "cursor" ? t("chat.modelNeedCursorLogin") : t("chat.modelNeedZcodeLogin"));
+        (runtime === "cursor"
+          ? t("chat.modelNeedCursorLogin")
+          : runtime === "zcode"
+            ? t("chat.modelNeedZcodeLogin")
+            : t("chat.modelNeedAntigravityLogin"));
       deps.modelMenuEl.appendChild(hint);
 
       const btn = document.createElement("button");
@@ -1079,7 +1093,9 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         ? t("chat.modelSyncDesktopBusy")
         : runtime === "cursor"
           ? t("native.loginCursor")
-          : t("native.loginZcode");
+          : runtime === "zcode"
+            ? t("native.loginZcode")
+            : t("native.loginAntigravity");
       btn.addEventListener("click", (event) => {
         event.stopPropagation();
         void syncDesktopAccount({

@@ -233,6 +233,7 @@ const AGENT_NAMES: Record<string, { name: string; badge: string }> = {
   qoder: { name: "Qoder", badge: "Qoder" },
   cursor: { name: "Cursor", badge: "Cursor" },
   workbuddy: { name: "WorkBuddy", badge: "WorkBuddy" },
+  antigravity: { name: "Antigravity", badge: "Antigravity" },
 };
 
 export type IslandSessionSource = {

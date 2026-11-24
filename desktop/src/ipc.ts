@@ -198,6 +198,16 @@ export function startSubscriptionLogin(runtime: string, name: string): Promise<S
   return invoke("start_subscription_login_command", { runtime, name });
 }
 
+export function saveGeminiKey(args: {
+  name: string;
+  mode: "api" | "cloud";
+  apiKey: string;
+  project: string;
+  location: string;
+}): Promise<SubscriptionPoolRow> {
+  return invoke("save_gemini_key_command", args);
+}
+
 export function runEngineRegister(args: {
   bootstrapToken: string;
   engineId: string | null;

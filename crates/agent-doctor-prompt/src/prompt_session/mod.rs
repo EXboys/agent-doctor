@@ -6,6 +6,7 @@
 
 mod acp;
 mod acp_backend;
+mod antigravity;
 mod backend;
 mod claude;
 mod codex_app_server;
@@ -68,6 +69,7 @@ static QODER_ASK: QoderAskBackend = QoderAskBackend;
 static CURSOR_ASK: CursorAskBackend = CursorAskBackend;
 static WORKBUDDY_ASK: WorkbuddyAskBackend = WorkbuddyAskBackend;
 static PI_ASK: PiAskBackend = PiAskBackend;
+static ANTIGRAVITY_ASK: antigravity::AntigravityAskBackend = antigravity::AntigravityAskBackend;
 static DOCTOR_ASK: doctor::DoctorAskBackend = doctor::DoctorAskBackend;
 
 /// Which runtimes have an [`AskBackend`] here. The registry in
@@ -85,6 +87,7 @@ pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
         "cursor" => Some(&CURSOR_ASK),
         "workbuddy" => Some(&WORKBUDDY_ASK),
         "pi" => Some(&PI_ASK),
+        "antigravity" => Some(&ANTIGRAVITY_ASK),
         agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID => Some(&DOCTOR_ASK),
         _ => None,
     }
@@ -103,6 +106,7 @@ pub fn ask_runtime_ids() -> Vec<&'static str> {
         "cursor",
         "workbuddy",
         "pi",
+        "antigravity",
         agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID,
     ]
 }
@@ -129,6 +133,7 @@ fn ask_cli_installed(runtime_id: &str) -> bool {
         "qoder" => agent_doctor_core::adapters::qoder_cli_path().is_some(),
         "cursor" => agent_doctor_core::adapters::cursor_cli_path().is_some(),
         "workbuddy" => agent_doctor_core::adapters::workbuddy_cli_path().is_some(),
+        "antigravity" => agent_doctor_core::adapters::agy_cli_path().is_some(),
         "zcode" => agent_doctor_core::adapters::locate_zcode_headless().is_some(),
         _ => true,
     }
@@ -648,7 +653,7 @@ fn push_failure_note(notes: &mut String, line: &str) {
 fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
     if matches!(
         runtime,
-        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID | "zcode" | "cursor"
+        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID | "zcode" | "cursor" | "antigravity"
     ) {
         return false;
     }
@@ -846,6 +851,7 @@ mod tests {
         assert!(ask_runtime_ids().contains(&"cursor"));
         assert!(ask_runtime_ids().contains(&"workbuddy"));
         assert!(ask_runtime_ids().contains(&"pi"));
+        assert!(ask_runtime_ids().contains(&"antigravity"));
     }
 
     #[test]

@@ -50,6 +50,9 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
                     .to_string(),
             );
         }
+        "antigravity" => {
+            return Ok(super::antigravity_uninstall_shell_command());
+        }
         "openclaw" => {
             return Ok(
                 "openclaw uninstall --service --yes --non-interactive; npm uninstall -g openclaw"
@@ -471,6 +474,21 @@ fn remove_user_desktop_bundles(candidates: Vec<std::path::PathBuf>) -> bool {
     removed
 }
 
+fn uninstall_antigravity() -> Result<()> {
+    let mut removed = false;
+    for rel in [".local/bin/agy", "AppData/Local/agy/bin/agy.exe"] {
+        let path = home_join(rel);
+        if (path.is_file() || path.is_symlink()) && std::fs::remove_file(&path).is_ok() {
+            removed = true;
+        }
+    }
+    if removed {
+        Ok(())
+    } else {
+        bail!("没找到能卸的 Antigravity。")
+    }
+}
+
 pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
     match runtime_id {
         "qoder" => {
@@ -524,6 +542,7 @@ pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
                 bail!("没找到能卸的 WorkBuddy。")
             }
         }
+        "antigravity" => uninstall_antigravity(),
         "cursor" => uninstall_cursor(),
         "zcode" => uninstall_zcode(),
         "hermes" if cfg!(windows) => uninstall_hermes_windows(),

@@ -67,6 +67,7 @@ import type {
   SessionStore,
   ToolStep,
 } from "./types";
+import { personFacingAssistantText } from "../friendly-error";
 import type { AskRuntime } from "../ask-resources";
 
 const sessionMessageIndex = new WeakMap<
@@ -349,6 +350,7 @@ export function createBubblesController(deps: BubblesDeps) {
     followChatLog(deps.logEl);
   }
   function setStreamingMarkdown(bubble: HTMLElement, markdown: string): void {
+    markdown = personFacingAssistantText(markdown);
     if (streamBoxBubble !== bubble) {
       streamHeadBox = document.createElement("div");
       streamHeadBox.className = "chat-stream-part";
@@ -556,9 +558,11 @@ export function createBubblesController(deps: BubblesDeps) {
     if (id) {
       const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
       const message = messageById(session, id);
-      if (message) return message.content;
+      if (message) return personFacingAssistantText(message.content);
     }
-    if (bubble === deps.getAssistantBubble() && deps.getAssistantRaw().trim()) return deps.getAssistantRaw();
+    if (bubble === deps.getAssistantBubble() && deps.getAssistantRaw().trim()) {
+      return personFacingAssistantText(deps.getAssistantRaw());
+    }
     return bubblePlainText(bubble);
   }
   function turnCopySource(bubble: HTMLElement): string {
@@ -816,7 +820,7 @@ export function createBubblesController(deps: BubblesDeps) {
     markdown: string,
     opts?: { deferHighlight?: boolean; skipCopySync?: boolean },
   ): void {
-    const source = markdown.trim();
+    const source = personFacingAssistantText(markdown).trim();
     if (!source) {
       bubble.innerHTML = "";
       return;

@@ -1029,6 +1029,7 @@ pub fn run() {
             reclaim_subscription_command,
             set_subscription_cap_command,
             set_subscription_proxy_command,
+            save_gemini_key_command,
             start_subscription_login_command,
             list_skills_inventory_command,
             skill_mount_runtime_ids_command,

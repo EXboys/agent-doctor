@@ -8,8 +8,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::secrets::{
-    personal_api_key_account, SecretBackend, SECRET_CUSTOM_SKILLS_TOKEN, SECRET_OVERLAY_API_KEY,
-    SECRET_TEAMUPS_LICENSE, SECRET_TEAM_API_KEY, SECRET_TEAM_ENGINE_INGEST,
+    personal_api_key_account, subscription_gemini_secret_account, SecretBackend,
+    SECRET_CUSTOM_SKILLS_TOKEN, SECRET_OVERLAY_API_KEY, SECRET_TEAMUPS_LICENSE,
+    SECRET_TEAM_API_KEY, SECRET_TEAM_ENGINE_INGEST,
 };
 
 pub const SCHEMA_VERSION: i64 = 1;
@@ -469,6 +470,20 @@ impl SettingsStore {
 
     pub fn get_personal_api_key(&self, provider_id: &str) -> Result<Option<String>> {
         self.secrets.get(&personal_api_key_account(provider_id))
+    }
+
+    pub(crate) fn set_subscription_gemini_secret(&self, name: &str, secret: &str) -> Result<()> {
+        self.secrets
+            .set(&subscription_gemini_secret_account(name), secret)
+    }
+
+    pub(crate) fn get_subscription_gemini_secret(&self, name: &str) -> Result<Option<String>> {
+        self.secrets.get(&subscription_gemini_secret_account(name))
+    }
+
+    pub(crate) fn delete_subscription_gemini_secret(&self, name: &str) -> Result<()> {
+        self.secrets
+            .delete(&subscription_gemini_secret_account(name))
     }
 
     pub fn resolved_skills_dir(&self) -> Result<PathBuf> {

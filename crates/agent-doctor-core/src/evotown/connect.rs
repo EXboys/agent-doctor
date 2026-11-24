@@ -532,6 +532,18 @@ fn apply_pool_step(
 fn spawn_job(tx: &Sender<Outbound>, job: AssignedJob, account: Option<String>) {
     let tx_worker = tx.clone();
     thread::spawn(move || {
+        let mut job = job;
+        if let Some(name) = account
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            if let Some(object) = job.payload.as_object_mut() {
+                object.insert("subscription".into(), json!(name));
+            } else {
+                job.payload = json!({ "subscription": name });
+            }
+        }
         let _ = tx_worker.send(Outbound::Json(json!({
             "type": "job.event",
             "job_id": job.job_id,

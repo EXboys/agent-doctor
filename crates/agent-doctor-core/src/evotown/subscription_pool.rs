@@ -44,7 +44,7 @@ pub struct ReportedSubscription {
     /// Not sent on a quota report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
-    /// `claude-code` or `codex`. Empty on rows saved before this field existed.
+    /// `claude-code`, `codex`, `gemini`, or `gemini-cloud`. Empty on rows saved before this field existed.
     #[serde(default)]
     pub runtime: String,
     /// False until this computer has reported a real remaining amount.
@@ -633,7 +633,7 @@ pub fn set_subscription_proxy_in(
 /// Accept `1.2.3.4:8080` or `http://1.2.3.4:8080`. Empty clears the binding.
 fn normalize_runtime(runtime: &str) -> String {
     match runtime.trim() {
-        "claude-code" | "codex" => runtime.trim().to_string(),
+        "claude-code" | "codex" | "gemini" | "gemini-cloud" => runtime.trim().to_string(),
         _ => String::new(),
     }
 }
@@ -729,6 +729,7 @@ pub fn forget_reported_subscription(name: &str) -> Result<()> {
 
 pub fn forget_reported_subscription_in(store: &SettingsStore, name: &str) -> Result<()> {
     let name = name.trim();
+    let _ = store.delete_subscription_gemini_secret(name);
     let accounts = load_reported_subscriptions_from(store)?
         .into_iter()
         .filter(|account| account.name != name)

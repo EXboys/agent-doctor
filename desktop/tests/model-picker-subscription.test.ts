@@ -246,6 +246,22 @@ async function main() {
     ),
     "Cursor does not accept OpenAI-compatible saved providers",
   );
+  assert(
+    runtimeAcceptsProvider(
+      "antigravity",
+      { id: "pp_gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai/" },
+      { officialSignedIn: true },
+    ),
+    "Antigravity accepts a Gemini key",
+  );
+  assert(
+    !runtimeAcceptsProvider(
+      "antigravity",
+      { id: "pp_ds", url: "https://api.deepseek.com/v1" },
+      { officialSignedIn: true },
+    ),
+    "Antigravity does not accept a non-Google key",
+  );
 
   // WorkBuddy and ZCode full subscription parity with Qoder.
   assert(accountSupportsModelList("workbuddy"), "WorkBuddy supports subscription model lists");

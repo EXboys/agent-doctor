@@ -539,7 +539,8 @@ export function createSendController(deps: SendDeps) {
             runtimeForTurn === "zcode" ||
             runtimeForTurn === "qoder" ||
             runtimeForTurn === "cursor" ||
-            runtimeForTurn === "workbuddy") &&
+            runtimeForTurn === "workbuddy" ||
+            runtimeForTurn === "antigravity") &&
           elevated,
         // Codex full-auto makes Codex reject what needs approval instead of
         // asking. This chat answers Allow itself, so Codex never gets it.

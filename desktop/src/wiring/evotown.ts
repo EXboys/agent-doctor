@@ -7,7 +7,7 @@ import type {
   EvotownStatus,
   SubscriptionPoolRow,
 } from "../types";
-import { getEngineRegisterStatus, getEvotownStatus, listSubscriptionPool, reclaimSubscription, runEvotownOnboarding as runEvotownOnboardingCommand, runEngineRegister as runEngineRegisterCommand, runSync, setSubscriptionCap, setSubscriptionDisabled, setSubscriptionProxy, startSubscriptionLogin } from "../ipc";
+import { getEngineRegisterStatus, getEvotownStatus, listSubscriptionPool, reclaimSubscription, runEvotownOnboarding as runEvotownOnboardingCommand, runEngineRegister as runEngineRegisterCommand, runSync, saveGeminiKey, setSubscriptionCap, setSubscriptionDisabled, setSubscriptionProxy, startSubscriptionLogin } from "../ipc";
 
 const evotownSectionEl = document.querySelector<HTMLElement>("#evotown-section")!;
 const evotownStatusEl = document.querySelector<HTMLElement>("#evotown-status")!;
@@ -38,11 +38,21 @@ const subscriptionPoolResultEl = document.querySelector<HTMLElement>("#subscript
 const subscriptionAddEl = document.querySelector<HTMLButtonElement>("#subscription-add")!;
 const subscriptionEmptyClaudeEl = document.querySelector<HTMLButtonElement>("#subscription-empty-claude")!;
 const subscriptionEmptyCodexEl = document.querySelector<HTMLButtonElement>("#subscription-empty-codex")!;
+const subscriptionEmptyGeminiEl = document.querySelector<HTMLButtonElement>("#subscription-empty-gemini")!;
 const subscriptionLoginEl = document.querySelector<HTMLElement>("#subscription-login")!;
 const subscriptionLoginBackEl = document.querySelector<HTMLButtonElement>("#subscription-login-back")!;
+const subscriptionLoginHintEl = document.querySelector<HTMLElement>("#subscription-login-hint")!;
 const subscriptionLoginClaudeEl = document.querySelector<HTMLButtonElement>("#subscription-login-claude")!;
 const subscriptionLoginCodexEl = document.querySelector<HTMLButtonElement>("#subscription-login-codex")!;
+const subscriptionLoginGeminiEl = document.querySelector<HTMLButtonElement>("#subscription-login-gemini")!;
 const subscriptionLoginNameEl = document.querySelector<HTMLInputElement>("#subscription-login-name")!;
+const subscriptionLoginGeminiFieldsEl = document.querySelector<HTMLElement>("#subscription-login-gemini-fields")!;
+const subscriptionLoginGeminiApiEl = document.querySelector<HTMLButtonElement>("#subscription-login-gemini-api")!;
+const subscriptionLoginGeminiCloudEl = document.querySelector<HTMLButtonElement>("#subscription-login-gemini-cloud")!;
+const subscriptionLoginKeyEl = document.querySelector<HTMLInputElement>("#subscription-login-key")!;
+const subscriptionLoginCloudFieldsEl = document.querySelector<HTMLElement>("#subscription-login-cloud-fields")!;
+const subscriptionLoginProjectEl = document.querySelector<HTMLInputElement>("#subscription-login-project")!;
+const subscriptionLoginLocationEl = document.querySelector<HTMLInputElement>("#subscription-login-location")!;
 const subscriptionLoginStartEl = document.querySelector<HTMLButtonElement>("#subscription-login-start")!;
 const subscriptionLoginResultEl = document.querySelector<HTMLElement>("#subscription-login-result")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
@@ -185,6 +195,7 @@ export function createEvotownController(deps: EvotownDeps) {
   let poolRows: SubscriptionPoolRow[] = [];
   let selectedPoolName: string | null = null;
   let loginRuntime = "";
+  let geminiMode: "api" | "cloud" = "api";
 
   function poolStatusKey(row: SubscriptionPoolRow): MessageKey {
     if (row.disabled) return "pool.status.disabled";
@@ -250,7 +261,9 @@ export function createEvotownController(deps: EvotownDeps) {
       note.className = "provider-item-note";
       const holder = row.holder.trim() ? t("pool.holder", { name: row.holder }) : t("pool.holderNone");
       const exit = row.proxy.trim() ? t("pool.proxyExit", { proxy: row.proxy }) : t("pool.proxyLocal");
-      note.textContent = `${t("pool.remaining", { remaining: String(row.remaining) })} · ${holder} · ${exit}`;
+      note.textContent = isGeminiRuntime(row.runtime)
+        ? `${poolKind(row.runtime)} · ${holder} · ${exit}`
+        : `${t("pool.remaining", { remaining: String(row.remaining) })} · ${holder} · ${exit}`;
       sub.append(note);
       main.append(title, sub);
 
@@ -274,13 +287,21 @@ export function createEvotownController(deps: EvotownDeps) {
   function paintEmptyKindIcons() {
     const claude = document.querySelector<HTMLElement>("#subscription-empty-claude-icon");
     const codex = document.querySelector<HTMLElement>("#subscription-empty-codex-icon");
+    const gemini = document.querySelector<HTMLElement>("#subscription-empty-gemini-icon");
     if (claude) setAgentBrandIcon(claude, "claude-code");
     if (codex) setAgentBrandIcon(codex, "codex");
+    if (gemini) setAgentBrandIcon(gemini, "gemini");
+  }
+
+  function isGeminiRuntime(runtime: string): boolean {
+    return runtime === "gemini" || runtime === "gemini-cloud";
   }
 
   function poolKind(runtime: string): string {
     if (runtime === "claude-code") return t("pool.kindClaude");
     if (runtime === "codex") return t("pool.kindCodex");
+    if (runtime === "gemini") return t("pool.kindGemini");
+    if (runtime === "gemini-cloud") return t("pool.kindGeminiCloud");
     return "";
   }
 
@@ -321,6 +342,10 @@ export function createEvotownController(deps: EvotownDeps) {
     subscriptionLoginEl.hidden = false;
     subscriptionLoginNameEl.placeholder = t("pool.namePlaceholder");
     subscriptionLoginResultEl.textContent = "";
+    subscriptionLoginKeyEl.value = "";
+    subscriptionLoginProjectEl.value = "";
+    subscriptionLoginLocationEl.value = "";
+    geminiMode = "api";
     paintLoginKind();
   }
 
@@ -333,8 +358,19 @@ export function createEvotownController(deps: EvotownDeps) {
   }
 
   function paintLoginKind() {
+    const gemini = loginRuntime === "gemini";
     subscriptionLoginClaudeEl.setAttribute("aria-pressed", loginRuntime === "claude-code" ? "true" : "false");
     subscriptionLoginCodexEl.setAttribute("aria-pressed", loginRuntime === "codex" ? "true" : "false");
+    subscriptionLoginGeminiEl.setAttribute("aria-pressed", gemini ? "true" : "false");
+    subscriptionLoginGeminiFieldsEl.hidden = !gemini;
+    subscriptionLoginCloudFieldsEl.hidden = !gemini || geminiMode !== "cloud";
+    subscriptionLoginGeminiApiEl.setAttribute("aria-pressed", geminiMode === "api" ? "true" : "false");
+    subscriptionLoginGeminiCloudEl.setAttribute("aria-pressed", geminiMode === "cloud" ? "true" : "false");
+    subscriptionLoginHintEl.textContent = gemini ? t("pool.geminiHint") : t("pool.addHint");
+    subscriptionLoginStartEl.textContent = gemini ? t("pool.geminiSave") : t("pool.loginStart");
+    subscriptionLoginKeyEl.placeholder = t("pool.geminiKeyPlaceholder");
+    subscriptionLoginProjectEl.placeholder = t("pool.geminiProjectPlaceholder");
+    subscriptionLoginLocationEl.placeholder = t("pool.geminiLocationPlaceholder");
   }
 
   async function beginSubscriptionLogin() {
@@ -347,19 +383,44 @@ export function createEvotownController(deps: EvotownDeps) {
       subscriptionLoginResultEl.textContent = t("pool.nameRequired");
       return;
     }
+    const gemini = loginRuntime === "gemini";
+    if (gemini && !subscriptionLoginKeyEl.value.trim()) {
+      subscriptionLoginResultEl.textContent = t("pool.geminiKeyRequired");
+      return;
+    }
+    if (gemini && geminiMode === "cloud" && !subscriptionLoginProjectEl.value.trim()) {
+      subscriptionLoginResultEl.textContent = t("pool.geminiProjectRequired");
+      return;
+    }
     subscriptionLoginStartEl.disabled = true;
-    subscriptionLoginResultEl.textContent = t("pool.loginWorking");
+    subscriptionLoginResultEl.textContent = gemini ? t("pool.geminiSaving") : t("pool.loginWorking");
     try {
-      await startSubscriptionLogin(loginRuntime, name);
+      if (gemini) {
+        await saveGeminiKey({
+          name,
+          mode: geminiMode,
+          apiKey: subscriptionLoginKeyEl.value.trim(),
+          project: subscriptionLoginProjectEl.value.trim(),
+          location: subscriptionLoginLocationEl.value.trim(),
+        });
+      } else {
+        await startSubscriptionLogin(loginRuntime, name);
+      }
       subscriptionLoginNameEl.value = "";
+      subscriptionLoginKeyEl.value = "";
+      subscriptionLoginProjectEl.value = "";
+      subscriptionLoginLocationEl.value = "";
       await loadSubscriptionPool();
       closeSubscriptionLogin();
       openPoolDetail(name);
-      subscriptionDetailResultEl.textContent = t("pool.loginOk", { name });
+      subscriptionDetailResultEl.textContent = gemini
+        ? t("pool.geminiOk", { name })
+        : t("pool.loginOk", { name });
     } catch (error) {
       subscriptionLoginResultEl.textContent = withErrorDetail(t("pool.failed"), error);
     } finally {
       subscriptionLoginStartEl.disabled = false;
+      paintLoginKind();
     }
   }
 
@@ -367,10 +428,14 @@ export function createEvotownController(deps: EvotownDeps) {
     subscriptionDetailNameEl.textContent = row.name;
     subscriptionDetailStatusEl.textContent = t(poolStatusKey(row));
     subscriptionDetailStatusEl.className = `subscription-pool-status${poolTone(row)}`;
-    subscriptionDetailMetaEl.textContent = `${t("pool.remaining", { remaining: String(row.remaining) })} · ${t("pool.expires", { date: row.expires_at })}`;
-    subscriptionDetailHolderEl.textContent = [poolKind(row.runtime), row.holder.trim()
-      ? t("pool.holder", { name: row.holder })
-      : t("pool.holderNone")].filter(Boolean).join(" · ");
+    const holder = row.holder.trim() ? t("pool.holder", { name: row.holder }) : t("pool.holderNone");
+    if (isGeminiRuntime(row.runtime)) {
+      subscriptionDetailMetaEl.textContent = poolKind(row.runtime);
+      subscriptionDetailHolderEl.textContent = holder;
+    } else {
+      subscriptionDetailMetaEl.textContent = `${t("pool.remaining", { remaining: String(row.remaining) })} · ${t("pool.expires", { date: row.expires_at })}`;
+      subscriptionDetailHolderEl.textContent = [poolKind(row.runtime), holder].filter(Boolean).join(" · ");
+    }
     subscriptionProxyEl.placeholder = t("pool.proxyPlaceholder");
     subscriptionProxyEl.value = row.proxy;
     subscriptionCapEl.placeholder = t("pool.capPlaceholder");
@@ -544,6 +609,19 @@ export function createEvotownController(deps: EvotownDeps) {
     subscriptionAddEl.addEventListener("click", () => openSubscriptionLogin(""));
     subscriptionEmptyClaudeEl.addEventListener("click", () => openSubscriptionLogin("claude-code"));
     subscriptionEmptyCodexEl.addEventListener("click", () => openSubscriptionLogin("codex"));
+    subscriptionEmptyGeminiEl.addEventListener("click", () => openSubscriptionLogin("gemini"));
+    subscriptionLoginGeminiEl.addEventListener("click", () => {
+      loginRuntime = "gemini";
+      paintLoginKind();
+    });
+    subscriptionLoginGeminiApiEl.addEventListener("click", () => {
+      geminiMode = "api";
+      paintLoginKind();
+    });
+    subscriptionLoginGeminiCloudEl.addEventListener("click", () => {
+      geminiMode = "cloud";
+      paintLoginKind();
+    });
     subscriptionLoginBackEl.addEventListener("click", () => closeSubscriptionLogin());
     subscriptionLoginClaudeEl.addEventListener("click", () => {
       loginRuntime = "claude-code";

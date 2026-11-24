@@ -451,6 +451,10 @@
   gap: 8px;
 }
 
+.subscription-kind-pick .subscription-kind:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .subscription-kind {
   appearance: none;
   display: flex;

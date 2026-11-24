@@ -299,6 +299,7 @@ export type ChatFailureKind =
   | "glm_codex_url"
   | "glm_coding_plan"
   | "geo_blocked"
+  | "agy_region"
   | "macos_denied"
   | "local_storage"
   | "account_balance"
@@ -412,6 +413,26 @@ function isModelNameProblem(raw: string, lower: string): boolean {
 function isAccountModelRejected(lower: string): boolean {
   if (!/model is not supported/.test(lower)) return false;
   return /chatgpt account/.test(lower) || /claude account/.test(lower);
+}
+
+/** Google refused this account: the region has no Antigravity login. */
+function isAgyRegionRefusal(raw: string): boolean {
+  const text = raw.replace(/^[\s⚠⚠️]+/u, "").trim();
+  if (!text || text.length > 800) return false;
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("#3501") ||
+    lower.includes("valid license of this product") ||
+    lower.includes("not currently available in your location") ||
+    (lower.includes("not eligible") && lower.includes("antigravity"))
+  );
+}
+
+/** The sentence on screen. A region refusal follows the interface language. */
+export function personFacingAssistantText(raw: string): string {
+  const explained = explainChatFailure(raw);
+  if (explained?.kind !== "agy_region") return raw;
+  return formatChatFailureLine(explained);
 }
 
 function isGeoBlockedService(lower: string): boolean {
@@ -581,6 +602,15 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       message: t("chat.fail.glmCodex.message"),
       next: t("chat.fail.glmCodex.next"),
       actions: ["repair", "provider", "native"],
+    };
+  }
+
+  if (isAgyRegionRefusal(text)) {
+    return {
+      kind: "agy_region",
+      message: t("chat.fail.agyRegion.message"),
+      next: t("chat.fail.agyRegion.next"),
+      actions: ["provider"],
     };
   }
 

@@ -1,5 +1,8 @@
 use std::path::Path;
 
+use crate::lifecycle::antigravity::{
+    antigravity_install_shell_command, antigravity_update_shell_command,
+};
 use crate::lifecycle::deepseek_harness::{
     deepseek_harness_install_shell_command, deepseek_harness_update_shell_command,
 };
@@ -37,6 +40,10 @@ pub fn runtime_allowed_bash_commands(runtime_id: &str) -> Vec<String> {
             "npm install -g @openai/codex".to_string(),
         ],
         "pi" => vec![pi_install_shell_command(), pi_update_shell_command()],
+        "antigravity" => vec![
+            antigravity_install_shell_command(),
+            antigravity_update_shell_command(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -164,6 +171,7 @@ fn version_cli_name(runtime_id: &str) -> Option<&'static str> {
         "claude-code" => Some("claude"),
         "codex" => Some("codex"),
         "pi" => Some("pi"),
+        "antigravity" => Some("agy"),
         _ => None,
     }
 }
@@ -182,6 +190,7 @@ pub fn bash_command_allowed_for_official_agent(command: &str) -> bool {
         "claude-code",
         "codex",
         "pi",
+        "antigravity",
     ]
     .iter()
     .any(|runtime| bash_command_allowed_for_runtime(runtime, command))

@@ -30,6 +30,7 @@ const VISION_RUNTIMES: &[&str] = &[
     "qoder",
     "cursor",
     "workbuddy",
+    "antigravity",
 ];
 
 #[derive(Debug, Clone, Serialize)]

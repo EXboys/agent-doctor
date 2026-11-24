@@ -1,3 +1,4 @@
+pub mod antigravity;
 pub mod cursor;
 pub mod deepseek_harness;
 mod download_route;
@@ -28,6 +29,10 @@ pub(crate) fn powershell_encoded(script: &str) -> String {
 pub use nodejs::{ensure_node_at_least, ensure_node_at_least_with_progress};
 pub use uninstall::{uninstall_runtime, uninstall_shell_command};
 
+pub use antigravity::{
+    antigravity_install_shell_command, antigravity_uninstall_shell_command,
+    antigravity_update_shell_command, run_antigravity_lifecycle, AntigravityLifecycleAction,
+};
 pub use cursor::{cursor_install_shell_command, run_cursor_lifecycle, CursorLifecycleAction};
 pub use deepseek_harness::{
     deepseek_harness_install_shell_command, deepseek_harness_is_outdated,
