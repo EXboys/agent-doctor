@@ -1,4 +1,5 @@
 import { focusMainTab } from "./ipc";
+import { refreshIslandFeed } from "./island/publish";
 import { transcriptImportEntry } from "./chat/transcript-import";
 import { applyBackgroundEvent } from "./chat/background-run";
 import { mountReplyChangeCard } from "./chat/reply-changes";
@@ -372,6 +373,7 @@ export function wireChatControllers(): void {
     getWorkspaceDoc: () => chatState.workspaceDoc,
     setWorkspaceDoc: (doc) => {
       chatState.workspaceDoc = doc;
+      refreshIslandFeed();
     },
     setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
   });

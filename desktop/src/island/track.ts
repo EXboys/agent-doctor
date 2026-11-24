@@ -229,11 +229,14 @@ const AGENT_NAMES: Record<string, { name: string; badge: string }> = {
   hermes: { name: "Hermes", badge: "Hermes" },
   openclaw: { name: "OpenClaw", badge: "OpenClaw" },
   "deepseek-harness": { name: "DeepSeek", badge: "DeepSeek" },
+  pi: { name: "Pi", badge: "Pi" },
   zcode: { name: "ZCode", badge: "ZCode" },
   qoder: { name: "Qoder", badge: "Qoder" },
   cursor: { name: "Cursor", badge: "Cursor" },
   workbuddy: { name: "WorkBuddy", badge: "WorkBuddy" },
+  acp: { name: "ACP", badge: "ACP" },
   antigravity: { name: "Antigravity", badge: "Antigravity" },
+  doctor: { name: "Agent Doctor", badge: "Doctor" },
 };
 
 export type IslandSessionSource = {
@@ -243,6 +246,12 @@ export type IslandSessionSource = {
   updatedAt: number;
   messages: { role: string; content: string }[];
   plan?: PlanStep[];
+  /** Human-readable project / workspace label. */
+  project?: string;
+  /** Per-session live state when running in parallel in Ask. */
+  working?: boolean;
+  needsYou?: boolean;
+  liveSpoken?: string;
 };
 
 export type IslandTurn = {
@@ -255,6 +264,7 @@ export type IslandRow = {
   agent: string;
   badge: string;
   runtime: string;
+  project?: string;
   preview: string;
   sent: string;
   spoken: string;
@@ -293,10 +303,9 @@ function leadSentence(text: string): string {
   return cut || plain;
 }
 
-const QUIET_MS = 7 * 24 * 60 * 60 * 1000;
-const ROW_CAP = 8;
-const TURN_CAP = 16;
-const TURN_CHARS_CAP = 6000;
+const ROW_CAP = 20;
+const TURN_CAP = 12;
+const TURN_CHARS_CAP = 2000;
 
 function clipTurnContent(text: string): string {
   const trimmed = text.trim();
@@ -307,7 +316,7 @@ function recentTurns(
   messages: { role: string; content: string }[],
   exchange: { sent: string; spoken: string },
   live: { sent: string; spoken: string },
-  current: boolean,
+  hasLive: boolean,
 ): IslandTurn[] {
   const turns: IslandTurn[] = [];
   for (const m of messages) {
@@ -317,7 +326,7 @@ function recentTurns(
     turns.push({ role: m.role, content });
   }
   const sliced = turns.slice(-TURN_CAP);
-  if (!current) return sliced;
+  if (!hasLive) return sliced;
   const liveSent = clipTurnContent(live.sent);
   const liveSpoken = clipTurnContent(live.spoken);
   if (liveSent && liveSent !== clipTurnContent(exchange.sent)) {
@@ -331,41 +340,56 @@ function recentTurns(
   return sliced.slice(-TURN_CAP);
 }
 
-/** Recent conversations for the expanded island. Live text wins for the open one. */
+/** Recent conversations for the expanded island. Live text wins for the running/open one. */
 export function buildIslandRows(
   sessions: IslandSessionSource[],
   activeId: string,
   live: { sent: string; spoken: string } = { sent: "", spoken: "" },
   opts: { now?: number; needsYouId?: string; workingId?: string } = {},
 ): IslandRow[] {
-  const now = opts.now ?? Date.now();
   const needsYouId = opts.needsYouId ?? "";
   const workingId = opts.workingId ?? "";
+  const liveTargetId = workingId || needsYouId || activeId;
   return [...sessions]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, ROW_CAP)
     .map((session) => {
       const messages = session.messages ?? [];
       const exchange = latestExchange(messages);
-      const current = session.id === activeId;
+      const current = Boolean(activeId) && session.id === activeId;
+      const isLiveTarget = Boolean(liveTargetId) && session.id === liveTargetId;
       let sent = exchange.sent;
       let spoken = exchange.spoken;
-      if (current && live.sent) {
+      const sessionLiveSpoken = session.liveSpoken?.trim() ?? "";
+      if (isLiveTarget && live.sent) {
         sent = live.sent;
         spoken = live.sent === exchange.sent ? live.spoken || exchange.spoken : live.spoken;
-      } else if (current && live.spoken) {
+      } else if (isLiveTarget && live.spoken) {
         spoken = live.spoken;
+      } else if (sessionLiveSpoken) {
+        spoken = sessionLiveSpoken;
       }
-      const turns = recentTurns(messages, exchange, live, current);
+      const rowLive = isLiveTarget
+        ? live
+        : sessionLiveSpoken
+          ? { sent: "", spoken: sessionLiveSpoken }
+          : { sent: "", spoken: "" };
+      const turns = recentTurns(
+        messages,
+        exchange,
+        rowLive,
+        isLiveTarget || Boolean(sessionLiveSpoken),
+      );
       const agent = agentOf(session.runtime);
-      const needsYou = Boolean(needsYouId) && session.id === needsYouId;
-      const working = !needsYou && Boolean(workingId) && session.id === workingId;
+      const needsYou = Boolean(session.needsYou) || (Boolean(needsYouId) && session.id === needsYouId);
+      const working =
+        !needsYou && (Boolean(session.working) || (Boolean(workingId) && session.id === workingId));
       const done = needsYou ? "" : leadSentence(spoken);
+      const project = session.project?.trim() || undefined;
       return {
         id: session.id,
         agent: agent.name,
         badge: agent.badge,
         runtime: session.runtime,
+        project,
         preview: clipPreview(done) || previewLine(session.title, sent),
         sent,
         spoken,
@@ -377,12 +401,9 @@ export function buildIslandRows(
         plan: session.plan?.length ? session.plan.slice(0, 24) : undefined,
       };
     })
-    .filter((row) => {
-      if (row.current || row.needsYou || row.working) return true;
-      if (!row.sent && !row.spoken) return false;
-      return now - row.at < QUIET_MS;
-    })
-    .sort((a, b) => rowRank(b) - rowRank(a) || b.at - a.at);
+    .filter((row) => Boolean(row.needsYou || row.working || row.sent || row.spoken))
+    .sort((a, b) => rowRank(b) - rowRank(a) || b.at - a.at)
+    .slice(0, ROW_CAP);
 }
 
 function rowRank(row: IslandRow): number {

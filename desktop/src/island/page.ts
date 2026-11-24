@@ -1,9 +1,11 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import "../platform";
 import { setAgentBrandIcon } from "../agent-brand";
+import type { WorkspaceDoc } from "../ask-resources";
 import { fitTextarea } from "../fit-textarea";
+import { islandProjectLabel, sessionWorkspaceName } from "../chat/session-workspace";
 import { applyOpenChatId, parseStoreRaw } from "../chat/store";
-import { STORAGE_KEY } from "../chat/types";
+import { STORAGE_KEY, type ChatSession, type SessionStore } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
 import { bindLocaleSync } from "../locale-sync";
 import { foldPreview, stripMarkdown } from "../chat/format";
@@ -24,6 +26,8 @@ import {
   islandForgetShot,
   islandShotPreview,
   islandSetReading,
+  listWorkspaces,
+  loadChatStore,
   resolvePermissionSession,
   startRegionCapture,
 } from "../ipc";
@@ -617,12 +621,84 @@ function renderPlain(raw: string): void {
   }
 }
 
-function rowsFromChat(): IslandFeedRow[] {
+let cachedStore: SessionStore | null = null;
+let cachedStoreRaw = "";
+let cachedWorkspaceDoc: WorkspaceDoc | null = null;
+let cachedWorkspaceStamp = "";
+let backingRefreshInFlight = false;
+let lastBackingRefreshAt = 0;
+
+function activeChatStore(): SessionStore | null {
+  if (cachedStore) return applyOpenChatId(cachedStore);
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return [];
+  if (!raw) return null;
   const parsed = parseStoreRaw(raw);
-  if (!parsed) return [];
-  const store = applyOpenChatId(parsed);
+  return parsed ? applyOpenChatId(parsed) : null;
+}
+
+function sessionProjectLabel(session: ChatSession): string | undefined {
+  const wsName = sessionWorkspaceName(session, cachedWorkspaceDoc);
+  if (!wsName) return undefined;
+  const label = islandProjectLabel(wsName, cachedWorkspaceDoc).trim();
+  return label || undefined;
+}
+
+function projectForSessionId(id: string): string | undefined {
+  const store = activeChatStore();
+  const session = store?.sessions.find((item) => item.id === id);
+  return session ? sessionProjectLabel(session) : undefined;
+}
+
+function refreshLocalBacking(force = false): void {
+  if (backingRefreshInFlight) return;
+  const now = Date.now();
+  if (!force && now - lastBackingRefreshAt < 1500) return;
+  backingRefreshInFlight = true;
+  lastBackingRefreshAt = now;
+  void Promise.allSettled([loadChatStore(), listWorkspaces()])
+    .then(([storeRes, wsRes]) => {
+      let changed = false;
+      if (storeRes.status === "fulfilled" && typeof storeRes.value === "string" && storeRes.value) {
+        if (storeRes.value !== cachedStoreRaw) {
+          const parsed = parseStoreRaw(storeRes.value);
+          if (parsed) {
+            cachedStoreRaw = storeRes.value;
+            cachedStore = parsed;
+            changed = true;
+          }
+        }
+      }
+      if (wsRes.status === "fulfilled" && wsRes.value) {
+        const stamp = JSON.stringify(wsRes.value);
+        if (stamp !== cachedWorkspaceStamp) {
+          cachedWorkspaceStamp = stamp;
+          cachedWorkspaceDoc = wsRes.value;
+          changed = true;
+        }
+      }
+      if (changed && lastView) {
+        feedSig = "";
+        render(lastView);
+      }
+    })
+    .finally(() => {
+      backingRefreshInFlight = false;
+    });
+}
+
+function makeProjectPill(project: string | undefined): HTMLSpanElement | null {
+  const text = project?.trim();
+  if (!text) return null;
+  const pill = document.createElement("span");
+  pill.className = "island-project";
+  pill.textContent = text;
+  pill.title = text;
+  return pill;
+}
+
+function rowsFromChat(): IslandFeedRow[] {
+  const store = activeChatStore();
+  if (!store) return [];
   return buildIslandRows(
     store.sessions.map((session) => ({
       id: session.id,
@@ -631,6 +707,7 @@ function rowsFromChat(): IslandFeedRow[] {
       updatedAt: session.updatedAt,
       messages: session.messages ?? [],
       plan: session.plan?.items,
+      project: sessionProjectLabel(session),
     })),
     store.activeId,
   );
@@ -648,9 +725,7 @@ function oneLine(text: string, max = 78): string {
 }
 
 function messagesFor(id: string): { role: string; content: string }[] {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return [];
-  const store = parseStoreRaw(raw);
+  const store = activeChatStore();
   const session = store?.sessions.find((item) => item.id === id);
   if (!session) return [];
   return (session.messages ?? [])
@@ -659,20 +734,23 @@ function messagesFor(id: string): { role: string; content: string }[] {
     .map((m) => ({ role: m.role, content: m.content.trim() }));
 }
 
-/** The latest thing you said, and the latest reply after it. The rest stays in the chat. */
+/** The latest thing you said, and the latest reply after it. Live snapshot fields win over disk. */
 function latestExchange(row: IslandFeedRow): { you: string; reply: string } {
+  const you = row.sent.trim();
+  const reply = row.spoken.trim();
+  if (you || reply) return { you, reply };
   const messages = messagesFor(row.id);
-  let you = row.sent.trim();
-  let reply = row.spoken.trim();
+  let fallbackYou = "";
+  let fallbackReply = "";
   for (const message of messages) {
     if (message.role === "user") {
-      you = message.content.trim();
-      reply = "";
+      fallbackYou = message.content.trim();
+      fallbackReply = "";
     } else {
-      reply = message.content.trim();
+      fallbackReply = message.content.trim();
     }
   }
-  return { you, reply };
+  return { you: fallbackYou, reply: fallbackReply };
 }
 
 function conversationTurns(row: IslandFeedRow): { role: "user" | "assistant"; content: string }[] {
@@ -949,6 +1027,8 @@ function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPen
   }
   const meta = document.createElement("span");
   meta.className = "island-meta";
+  const projectPill = makeProjectPill(row.project);
+  if (projectPill) meta.append(projectPill);
   const when = document.createElement("span");
   when.className = "island-when";
   when.textContent = ago(row.at);
@@ -1067,9 +1147,11 @@ function renderFeed(rows: IslandFeedRow[]): void {
     const when = document.createElement("span");
     when.className = "island-when";
     when.textContent = ago(row.at);
+    const projectPill = makeProjectPill(row.project);
     const meta = document.createElement("span");
     meta.className = "island-meta";
     if (open) {
+      if (projectPill) headline.append(projectPill);
       headline.append(when);
       appendState(meta, row);
       const more = document.createElement("button");
@@ -1089,6 +1171,7 @@ function renderFeed(rows: IslandFeedRow[]): void {
       badge.className = "island-badge";
       badge.dataset.runtime = row.runtime;
       badge.textContent = row.badge;
+      if (projectPill) meta.append(projectPill);
       meta.append(when, badge);
       appendState(meta, row);
     }
@@ -1130,7 +1213,19 @@ function renderFeed(rows: IslandFeedRow[]): void {
 
 function renderDetail(raw: string): void {
   const fromSnapshot = parseFeed(raw);
-  const rows = fromSnapshot && fromSnapshot.length > 0 ? fromSnapshot : rowsFromChat();
+  const storeRows = cachedStore || !fromSnapshot?.length ? rowsFromChat() : [];
+  let chosen: IslandFeedRow[];
+  if (fromSnapshot && fromSnapshot.length > 0) {
+    const snapLive = fromSnapshot.some((row) => row.working || row.needsYou);
+    const maxSnapAt = Math.max(0, ...fromSnapshot.map((row) => row.at));
+    const maxStoreAt = Math.max(0, ...storeRows.map((row) => row.at));
+    chosen = !snapLive && maxStoreAt > maxSnapAt + 1000 ? storeRows : fromSnapshot;
+  } else {
+    chosen = storeRows;
+  }
+  const rows = chosen.map((row) =>
+    row.project ? row : { ...row, project: projectForSessionId(row.id) },
+  );
   if (rows.length > 0) renderFeed(rows);
   else renderPlain(raw);
 }
@@ -1271,8 +1366,10 @@ function render(view: IslandView): void {
   lastView = view;
   if (!root || !titleEl || !detailEl) return;
   root.hidden = !view.shown;
-  if (root.classList.contains("is-expanded") !== view.expanded) {
+  const wasExpanded = root.classList.contains("is-expanded");
+  if (wasExpanded !== view.expanded) {
     window.getSelection()?.removeAllRanges();
+    if (view.expanded) refreshLocalBacking(false);
   }
   if (!view.expanded) {
     pointerInside = false;
@@ -2036,6 +2133,7 @@ function boot(): void {
       if (hideIdleEl) hideIdleEl.checked = hide;
     })
     .catch(() => {});
+  refreshLocalBacking(true);
   void currentIslandView()
     .then(render)
     .catch(() => {});
@@ -2046,14 +2144,17 @@ function boot(): void {
     })
     .catch(() => {});
   void import("@tauri-apps/api/event")
-    .then(({ listen }) =>
-      listen<{ sessionId?: string; status?: string }>("island-send-result", (event) => {
+    .then(({ listen }) => {
+      void listen<{ sessionId?: string; status?: string }>("island-send-result", (event) => {
         const status = event.payload?.status ?? "failed";
         const sessionId = event.payload?.sessionId ?? "";
         if (shot?.phase === "sent") noteShotSendResult(status, sessionId);
         else showSendResult(status);
-      }),
-    )
+      }).catch(() => {});
+      void listen("workspace-changed", () => {
+        refreshLocalBacking(true);
+      }).catch(() => {});
+    })
     .catch(() => {});
   void import("@tauri-apps/api/webviewWindow")
     .then(({ getCurrentWebviewWindow }) => {

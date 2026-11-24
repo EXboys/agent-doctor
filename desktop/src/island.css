@@ -1008,6 +1008,22 @@ html.is-status-chip .island.is-expanded .island-idle {
 .island-badge[data-runtime="codex"] { background: #2e2a3d; color: #d4c6f5; }
 .island-badge[data-runtime="hermes"] { background: #243028; color: #b7e0b4; }
 .island-badge[data-runtime="openclaw"] { background: #243038; color: #9fd4ea; }
+.island-badge[data-runtime="pi"] { background: #252b3b; color: #b9ccff; }
+
+.island-project {
+  flex: 0 1 auto;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  font-weight: 550;
+  color: rgba(255, 255, 255, 0.68);
+}
 
 .island-state {
   flex: none;

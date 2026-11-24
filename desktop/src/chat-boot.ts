@@ -1,5 +1,12 @@
 import { setFollowQueueInsertHandler } from "./chat/follow-queue";
-import { isChatRunning, liveRuns, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
+import {
+  backgroundChoiceCount,
+  isChatRunning,
+  liveRun,
+  liveRuns,
+  MAX_PARALLEL_RUNS,
+  runningCount,
+} from "./chat/live-runs";
 import {
   OFFICIAL_GIFT_MODEL,
   OFFICIAL_PROVIDER_ID,
@@ -165,6 +172,7 @@ import { createEmptySession } from "./chat/store";
 import { readAutoApproveDefault } from "./chat/confirm-pref";
 import {
   defaultWorkspaceName,
+  islandProjectLabel,
   projectDisplayLabel,
   sessionWorkspacePath,
 } from "./chat/session-workspace";
@@ -1335,14 +1343,25 @@ function bootChatTail(): void {
   startIslandPublisher(promptEl, () => ({
     activeId: chatState.store?.activeId ?? "",
     attentionId: chatState.runningChatSessionId || chatState.store?.activeId || "",
-    sessions: (chatState.store?.sessions ?? []).map((session) => ({
-      id: session.id,
-      runtime: session.runtime,
-      title: session.title,
-      updatedAt: session.updatedAt,
-      messages: session.messages ?? [],
-      plan: session.plan?.items,
-    })),
+    sessions: (chatState.store?.sessions ?? []).map((session) => {
+      const wsName = sessionWorkspaceName(session, chatState.workspaceDoc);
+      const project = wsName ? islandProjectLabel(wsName, chatState.workspaceDoc) : undefined;
+      const run = liveRun(session.id);
+      const waiting = backgroundChoiceCount(session.id) > 0;
+      const running = isChatRunning(session.id) && !waiting;
+      return {
+        id: session.id,
+        runtime: session.runtime,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        messages: session.messages ?? [],
+        plan: session.plan?.items,
+        project,
+        working: running,
+        needsYou: waiting,
+        liveSpoken: run?.assistantRaw || undefined,
+      };
+    }),
   }));
 }
 

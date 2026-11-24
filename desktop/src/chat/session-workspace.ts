@@ -32,6 +32,21 @@ export function projectDisplayLabel(name: string, doc: WorkspaceDoc | null): str
   return title || name;
 }
 
+/** Compact project badge label for the top island (never exposes raw `lan-uuid::` keys). */
+export function islandProjectLabel(name: string, doc: WorkspaceDoc | null): string {
+  const entry = doc?.workspaces[name];
+  const title = entry?.title?.trim();
+  const host = entry?.hostLabel?.trim();
+  const cleanHost = host && !/^lan-[0-9a-f-]{8,}/i.test(host) ? host : "";
+  if (title) return cleanHost ? `${cleanHost} · ${title}` : title;
+  const sep = name.indexOf("::");
+  if (sep > 0) {
+    const remoteProject = name.slice(sep + 2).trim();
+    if (remoteProject) return cleanHost ? `${cleanHost} · ${remoteProject}` : remoteProject;
+  }
+  return cleanHost ? `${cleanHost} · ${name}` : name;
+}
+
 export function defaultWorkspaceName(doc: WorkspaceDoc | null): string | null {
   if (!doc) return null;
   const active = doc.active?.trim();

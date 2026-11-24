@@ -164,6 +164,7 @@ let durableBodyStamp = "";
 
 export function saveStore(): void {
   perfMark("store-save");
+  refreshIslandFeed();
   if (isChatStoreDurableReady()) {
     // The database is the real copy: drain straight to it. The localStorage
     // mirror (a full stringify plus backup parse/write - seconds on a full
