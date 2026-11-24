@@ -89,6 +89,7 @@ version = "0.1.100-beta.18"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
+ "agent-doctor-proxy",
  "anyhow",
  "base64 0.23.1",
  "cbc",
@@ -194,6 +195,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doctor-proxy"
+version = "0.1.100-beta.18"
+dependencies = [
+ "libc",
+ "tempfile",
+ "windows-registry",
 ]
 
 [[package]]

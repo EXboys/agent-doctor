@@ -86,9 +86,7 @@ export function mountChatFailureActions(
 function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): string {
   switch (action) {
     case "provider":
-      return explain.kind === "provider_url" ||
-        explain.kind === "network" ||
-        explain.kind === "unknown"
+      return explain.kind === "provider_url" || explain.kind === "unknown"
         ? t("repair.gatewayUnreachableNext")
         : t("chat.fail.actionProvider");
     case "repair":
@@ -146,7 +144,7 @@ async function runChatFailureAction(
       await focusMainTab({ tab: "provider" });
       writeActionResult(
         actions,
-        explain.kind === "provider_url" || explain.kind === "network" || explain.kind === "unknown"
+        explain.kind === "provider_url" || explain.kind === "unknown"
           ? t("chat.fail.openedAddress")
           : t("chat.fail.openedProvider"),
         "muted",

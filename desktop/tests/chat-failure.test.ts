@@ -201,6 +201,23 @@ async function main() {
     "2026-10-18T03:40:45.466165Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: Connection reset by peer",
   );
   assert(resets?.kind === "network", "a connection reset without a model refusal stays a network failure");
+  assert(resets!.message.includes("连不上"), "network copy names reachability");
+  assert(resets!.actions.includes("askAgain") && !resets!.actions.includes("provider"), "network offers ask again, not check-address");
+  assert(!resets!.next.includes("核对地址") && !resets!.next.includes("验证"), "network does not send the user to verify an address");
+
+  const chatgptTimeout = explainChatFailure(
+    [
+      "2026-11-24T11:27:47.583335Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out",
+      'ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))',
+      "Reconnecting... 5/5",
+      "workspace routing discovery failed",
+    ].join("\n"),
+  );
+  assert(chatgptTimeout?.kind === "network", "chatgpt subscription transport failure is network, not a typed address");
+  assert(
+    !chatgptTimeout!.message.includes("地址") && !chatgptTimeout!.actions.includes("provider"),
+    "chatgpt transport failure never says check the address",
+  );
 
   const dshNoKey = explainChatFailure(
     'Internal error: turn failed: llm-deepseek: no API key for provider route "deepseek-official"; store DEEPSEEK_API_KEY through the credentials service',

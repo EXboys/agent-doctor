@@ -596,9 +596,14 @@ fn quoted_tokens(text: &str) -> Vec<&str> {
 /// directly and attaches a hidden console (`CREATE_NO_WINDOW`), so neither the
 /// CLI nor the children it spawns (`codex.js -> codex.exe`, shell tools, MCP
 /// servers) open a visible terminal window.
+///
+/// The child also gets the proxy the user's terminal would use (see
+/// `agent_doctor_proxy`). A caller that must stay direct removes the proxy
+/// variables after this returns.
 pub fn command_for_path(program: &Path) -> Command {
     let mut cmd = build_command(program, &[]);
     apply_probe_no_window(&mut cmd);
+    agent_doctor_proxy::apply(&mut cmd);
     cmd
 }
 

@@ -849,6 +849,8 @@ export const en = {
     "chat.fail.balance.next": "Recharge on the provider’s site, or tap Open Provider and switch to a key that still has credit.",
     "chat.fail.rateLimit.message": "Too many questions just now, so the model is not taking this one. This app is fine.",
     "chat.fail.rateLimit.next": "Wait a moment, then ask again.",
+    "chat.fail.network.message": "Cannot reach the model’s servers, so this turn did not go through.",
+    "chat.fail.network.next": "Check that the network or proxy is on, then ask again.",
     "chat.fail.actionAskAgain": "Ask again",
     "chat.fail.askAgainReady": "The box below is ready. Wait a moment, then send.",
     "chat.fail.actionPrivacy": "Open System Settings",

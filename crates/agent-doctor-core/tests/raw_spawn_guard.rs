@@ -70,6 +70,14 @@ fn guarded_sources() -> Vec<PathBuf> {
             .canonicalize()
             .expect("agent-doctor-prompt/src next to agent-doctor-core"),
         manifest
+            .join("../agent-doctor-proxy/src")
+            .canonicalize()
+            .expect("agent-doctor-proxy/src next to agent-doctor-core"),
+        manifest
+            .join("../agent-doctor-proxy/src")
+            .canonicalize()
+            .expect("agent-doctor-proxy/src next to agent-doctor-core"),
+        manifest
             .join("../agent-doctor-repair/src")
             .canonicalize()
             .expect("agent-doctor-repair/src next to agent-doctor-core"),

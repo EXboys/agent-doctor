@@ -851,6 +851,8 @@ export const zh = {
     "chat.fail.balance.next": "到服务商网站充值，或点「去服务商」换一个还有额度的密钥。",
     "chat.fail.rateLimit.message": "这会儿问得太勤，模型那边暂时不接了。这不是本软件的问题。",
     "chat.fail.rateLimit.next": "等一会儿再问一次。",
+    "chat.fail.network.message": "连不上模型那边的服务器，这一轮没问到。",
+    "chat.fail.network.next": "确认网络或代理开着，再问一次。",
     "chat.fail.actionAskAgain": "再问一次",
     "chat.fail.askAgainReady": "输入框已在下面。等一会儿再发送。",
     "chat.fail.actionPrivacy": "打开系统设置",

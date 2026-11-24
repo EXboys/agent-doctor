@@ -20,6 +20,8 @@ pub mod mask;
 pub mod presets;
 pub mod probe;
 pub mod profile;
+/// Proxy variables every agent CLI child gets; applied in `exec::command_for_path`.
+pub use agent_doctor_proxy as proxy;
 pub mod remote;
 /// Redaction, diagnostic, and typed-action types shared by probe, install,
 /// workspace, setup, and the repair crate.

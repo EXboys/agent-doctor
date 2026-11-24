@@ -1,0 +1,18 @@
+[package]
+name = "agent-doctor-proxy"
+description = "Pick the network proxy that agent CLIs (Claude Code, Codex, Antigravity, ...) should use"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+
+[dev-dependencies]
+tempfile = "3"

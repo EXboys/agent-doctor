@@ -693,6 +693,19 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
     };
   }
 
+  // Transport-shaped failure: timed out, channel closed, or reconnect exhausted.
+  // That is not a bad gateway address the user typed — "Check the address" cannot
+  // clear it. Match the shape (retry counter, closed channel, bare timeout without
+  // an HTTP status), never one host or one product name.
+  if (isTransportNetworkFailure(lower)) {
+    return {
+      kind: "network",
+      message: t("chat.fail.network.message"),
+      next: t("chat.fail.network.next"),
+      actions: ["askAgain", "native"],
+    };
+  }
+
   const provider = explainProviderFailure(text);
   // Address and unknown failures cannot be rewritten here. Do not offer a settings apply.
   const actions: ChatFailureAction[] = ["provider", "native"];
@@ -714,12 +727,46 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
     return null;
   }
 
+  if (kind === "network") {
+    return {
+      kind,
+      message: t("chat.fail.network.message"),
+      next: t("chat.fail.network.next"),
+      actions: ["askAgain", "native"],
+    };
+  }
+
   return {
     kind,
     message: provider.message,
     next: provider.next,
     actions: [...new Set(actions)],
   };
+}
+
+/**
+ * A turn never got an HTTP status from the model host: the socket timed out,
+ * the transport closed, or reconnect ran out. Distinguish from a typed gateway
+ * address that was refused (ECONNREFUSED / 404 / getaddrinfo).
+ */
+function isTransportNetworkFailure(lower: string): boolean {
+  if (
+    /reconnecting\.\.\.\s*\d+\s*\/\s*\d+|transport channel closed|workspace routing discovery failed|failed to refresh available models/.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b404\b|\b401\b|\b403\b|\b429\b|econnrefused|connection refused|getaddrinfo|enotfound|no models endpoint|unexpected status/.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
+  return /request timed out|error sending request|connection reset by peer|worker quit with fatal|timed?\s*out after/.test(
+    lower,
+  );
 }
 
 export function formatChatFailureLine(explain: ChatFailureExplain): string {

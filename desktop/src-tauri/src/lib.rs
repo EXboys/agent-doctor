@@ -925,6 +925,9 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     macos_activation::install();
     agent_doctor_core::quiet_system_error_dialogs();
+    // Opened from the Dock, the app has none of the proxy variables in the
+    // user's shell rc. Read them now so the first ask already has them.
+    agent_doctor_core::proxy::warm();
     agent_doctor_mcp::register_browser_mcp_wire_backend();
     agent_doctor_repair::register();
     let mut builder = tauri::Builder::default()
