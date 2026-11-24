@@ -30,6 +30,7 @@ import { teamupsAccountPageUrl } from "../teamups-site";
 import type {
   ClusterStatus,
   NativeAccountRow,
+  NativeAccountSwitch,
   PersonalProviderListItem,
   TeamupsAccountStatus,
 } from "../types";
@@ -119,6 +120,36 @@ export function nativeAccountLabel(runtimeId: string): string {
       return t("native.deepseek");
     default:
       return runtimeId;
+  }
+}
+
+/** Why a sign-in did not finish: the tool's own reason, not a generic hint. */
+function loginFailureMessage(result: NativeAccountSwitch): string {
+  if (result.outcome === "unreachable") return t("native.unreachable");
+  if (result.outcome === "missing_tool") return missingToolMessage(result.runtime_id);
+  const detail = result.detail?.trim();
+  if (detail) return t("native.incompleteDetail", { detail });
+  return t("chat.modelSyncDesktopIncomplete");
+}
+
+function missingToolMessage(runtimeId: string): string {
+  switch (runtimeId.trim()) {
+    case "codex":
+      return t("native.missingCodex");
+    case "claude-code":
+      return t("native.missingClaude");
+    case "qoder":
+      return t("native.missingQoder");
+    case "cursor":
+      return t("native.missingCursor");
+    case "workbuddy":
+      return t("native.missingWorkbuddy");
+    case "zcode":
+      return t("native.missingZcode");
+    case "antigravity":
+      return t("native.missingAntigravity");
+    default:
+      return t("native.missingClaude");
   }
 }
 
@@ -712,10 +743,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         deps.updateContextMeter();
         deps.setStatus(t("chat.modelSyncDesktopDone", { account: updated.label }), "ok");
       } else {
-        const message =
-          result.outcome === "unreachable"
-            ? t("native.unreachable")
-            : t("chat.modelSyncDesktopIncomplete");
+        const message = loginFailureMessage(result);
         syncFeedbackByRuntime.set(catalog.runtimeId, message);
         deps.setStatus(message, "warn");
       }

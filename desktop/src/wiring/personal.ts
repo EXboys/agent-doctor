@@ -413,8 +413,12 @@ export function createPersonalController(deps: PersonalDeps) {
         return t("native.noProvider");
       case "unsupported":
         return t("native.unsupported", { tool });
-      default:
-        return t("native.incomplete");
+      default: {
+        const detail = result.detail?.trim();
+        return detail
+          ? t("native.incompleteDetail", { detail })
+          : t("native.incomplete");
+      }
     }
   }
 

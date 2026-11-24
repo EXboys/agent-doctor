@@ -2293,6 +2293,7 @@ export const zh = {
     "native.usingDone": "{tool} 已改用 {account}。",
     "native.reverted": "{tool} 已改用 {name}，不再用 {account}。",
     "native.incomplete": "登录没完成。已经登录的话，在浏览器里点一下「继续」。",
+    "native.incompleteDetail": "登录没完成。{detail}",
     "native.openedCli": "已打开命令行。在里面登录你的账号，再回到这里。",
     "native.unreachable": "这个网络打不开登录页。换一个能打开的网络后再点。",
     "native.missingCodex": "先安装 Codex。",

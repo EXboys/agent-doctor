@@ -600,6 +600,8 @@ export interface NativeAccountSwitch {
   using_subscription: boolean;
   outcome: string;
   provider_name: string;
+  /** What the login tool printed when it stopped without signing in. */
+  detail?: string;
 }
 
 export interface PersonalProviderSetupReport {

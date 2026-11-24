@@ -116,6 +116,10 @@ pub struct NativeAccountSwitch {
     /// `using` | `reverted` | `login_incomplete` | `unreachable` | `missing_tool` | `no_provider` | `unsupported`
     pub outcome: String,
     pub provider_name: String,
+    /// What the login tool itself printed when it stopped without signing in.
+    /// Empty when nothing was captured.
+    #[serde(default)]
+    pub detail: String,
 }
 
 pub fn is_native_subscription(runtime_id: &str) -> bool {
@@ -350,11 +354,28 @@ fn switch(
     outcome: &str,
     provider_name: String,
 ) -> NativeAccountSwitch {
+    switch_detail(
+        runtime_id,
+        using_subscription,
+        outcome,
+        provider_name,
+        String::new(),
+    )
+}
+
+fn switch_detail(
+    runtime_id: &str,
+    using_subscription: bool,
+    outcome: &str,
+    provider_name: String,
+    detail: String,
+) -> NativeAccountSwitch {
     NativeAccountSwitch {
         runtime_id: runtime_id.to_string(),
         using_subscription,
         outcome: outcome.to_string(),
         provider_name,
+        detail,
     }
 }
 
@@ -637,13 +658,23 @@ fn use_zcode_subscription(provider_name: String) -> Result<NativeAccountSwitch> 
         write_mode(ZCODE_ID, MODE_SUBSCRIPTION)?;
         return Ok(switch(ZCODE_ID, true, "using", provider_name));
     }
-    let _ = spawn_zcode_login(&launch, family);
+    let login = spawn_zcode_login(&launch, family);
     if zcode_logged_in() {
         let _ = crate::setup::refresh_account_models(ZCODE_ID);
         write_mode(ZCODE_ID, MODE_SUBSCRIPTION)?;
         return Ok(switch(ZCODE_ID, true, "using", provider_name));
     }
-    Ok(switch(ZCODE_ID, false, "login_incomplete", provider_name))
+    let detail = login
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default();
+    Ok(switch_detail(
+        ZCODE_ID,
+        false,
+        "login_incomplete",
+        provider_name,
+        detail,
+    ))
 }
 
 fn agy_url_is_gemini_api(url: &str) -> bool {
@@ -1257,12 +1288,18 @@ fn zcode_needs_family_sync(preferred_family: &str) -> bool {
     let Some(map) = creds.as_object() else {
         return true;
     };
-    let family_prefix = format!("account-provider:account:{preferred_family}-");
+    // `zcode login <family>` saves the identity as `account-provider:<family>`,
+    // while the desktop registry saves `account-provider:account:<family>-<plan>`.
+    let cli_key = format!("account-provider:{preferred_family}:identity");
+    let desktop_prefix = format!("account-provider:account:{preferred_family}-");
     let has_family_identity = map.iter().any(|(k, v)| {
-        k.starts_with(&family_prefix)
-            && k.ends_with(":identity")
-            && !k.ends_with("-start-plan:identity")
-            && nonempty_str(Some(v))
+        if !nonempty_str(Some(v)) {
+            return false;
+        }
+        k == &cli_key
+            || (k.starts_with(&desktop_prefix)
+                && k.ends_with(":identity")
+                && !k.ends_with("-start-plan:identity"))
     });
     !has_family_identity
 }
@@ -1519,6 +1556,9 @@ fn find_workbuddy_log_auth_url(logs_dir: &Path, since: SystemTime) -> Option<Str
     None
 }
 
+/// Combined stdout/stderr kept from one login child, for the failure message.
+type LoginOutputTail = Arc<std::sync::Mutex<String>>;
+
 fn spawn_zcode_login(launch: &crate::adapters::ZcodeHeadless, family: &str) -> Result<()> {
     let mut cmd = crate::adapters::zcode_headless_command(launch);
     crate::session_env::scrub_subscription_gateway_env(&mut cmd);
@@ -1530,13 +1570,16 @@ fn spawn_zcode_login(launch: &crate::adapters::ZcodeHeadless, family: &str) -> R
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let open_shim = install_macos_login_open_shim(&mut cmd);
-    let mut child = cmd.spawn()?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("无法启动 ZCode 登录进程：{error}"))?;
+    let output: LoginOutputTail = Arc::new(std::sync::Mutex::new(String::new()));
     let opened = Arc::new(AtomicBool::new(false));
     if let Some(pipe) = child.stdout.take() {
-        watch_login_output_mode(pipe, Arc::clone(&opened), true);
+        watch_login_output_collected(pipe, Arc::clone(&opened), Arc::clone(&output));
     }
     if let Some(pipe) = child.stderr.take() {
-        watch_login_output_mode(pipe, Arc::clone(&opened), true);
+        watch_login_output_collected(pipe, opened.clone(), Arc::clone(&output));
     }
     let started = Instant::now();
     loop {
@@ -1548,17 +1591,89 @@ fn spawn_zcode_login(launch: &crate::adapters::ZcodeHeadless, family: &str) -> R
         if started.elapsed() > LOGIN_WAIT {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("login timed out");
+            bail!(
+                "等了 {} 秒还没有完成网页确认。{}",
+                LOGIN_WAIT.as_secs(),
+                zcode_login_output_reason(&output)
+            )
         }
         match child.try_wait() {
             Ok(Some(_)) => {
                 drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+                if !zcode_logged_in() {
+                    // Let the reader threads reach EOF so the tail is complete.
+                    thread::sleep(Duration::from_millis(250));
+                    bail!(
+                        "ZCode 登录进程退出了，但没有登录成功。{}",
+                        zcode_login_output_reason(&output)
+                    )
+                }
                 return Ok(());
             }
             Ok(None) => thread::sleep(Duration::from_millis(200)),
             Err(_) => return Ok(()),
         }
     }
+}
+
+/// One short line the ZCode login tool printed, shown when a login stopped.
+/// The printed authorize URL itself is never the reason, and an empty stream
+/// (the process died before printing anything) stays empty so the UI can say so.
+fn zcode_login_output_reason(tail: &LoginOutputTail) -> String {
+    let Ok(kept) = tail.lock() else {
+        return String::new();
+    };
+    let text = kept.trim();
+    if text.is_empty() {
+        return "它没有留下任何输出。".to_string();
+    }
+    let without_urls: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.contains("https://"))
+        .collect();
+    let reason = if without_urls.is_empty() {
+        text
+    } else {
+        &without_urls.join(" ")
+    };
+    let chars: Vec<char> = reason.chars().collect();
+    if chars.len() > 200 {
+        format!(
+            "它最后输出：…{}",
+            chars[chars.len() - 200..].iter().collect::<String>()
+        )
+    } else {
+        format!("它最后输出：{reason}")
+    }
+}
+
+/// Like [`watch_login_output_mode`] with `always_open_url`, and the whole
+/// stream is also kept (tail only) for the failure message.
+fn watch_login_output_collected<R>(pipe: R, opened: Arc<AtomicBool>, tail: LoginOutputTail)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut reader = BufReader::new(pipe);
+        let mut pending = String::new();
+        let mut chunk = [0_u8; 512];
+        while let Ok(n) = reader.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            pending.push_str(&String::from_utf8_lossy(&chunk[..n]));
+            maybe_open_login_url_mode(&pending, &opened, false, true);
+        }
+        maybe_open_login_url_mode(&pending, &opened, true, true);
+        if let Ok(mut kept) = tail.lock() {
+            kept.push_str(&pending);
+            let excess = kept.chars().count().saturating_sub(600);
+            if excess > 0 {
+                *kept = kept.chars().skip(excess).collect();
+            }
+        }
+    });
 }
 
 fn spawn_cli_login(binary: &Path) -> Result<()> {
@@ -2842,6 +2957,66 @@ mod tests {
         assert!(dsh_credentials_are_signed_in(
             "deepseek:\n  access_token: tok-123\n"
         ));
+    }
+
+    #[test]
+    fn zcode_family_sync_accepts_both_login_key_shapes() {
+        use crate::adapters::util::with_test_home;
+
+        let dir = tempfile::tempdir().unwrap();
+        with_test_home(dir.path(), || {
+            let zcode_v2 = dir.path().join(".zcode/v2");
+            fs::create_dir_all(&zcode_v2).unwrap();
+            let creds_path = zcode_v2.join("credentials.json");
+
+            // An oauth token alone never clears the sync flag.
+            fs::write(
+                &creds_path,
+                r#"{"oauth:bigmodel:access_token":"tok","zcodejwttoken":"jwt"}"#,
+            )
+            .unwrap();
+            assert!(zcode_needs_family_sync("bigmodel"));
+
+            // `zcode login bigmodel` saves the plain family key.
+            fs::write(
+                &creds_path,
+                r#"{"account-provider:bigmodel:identity":"id-1"}"#,
+            )
+            .unwrap();
+            assert!(!zcode_needs_family_sync("bigmodel"));
+            assert!(zcode_needs_family_sync("zai"));
+
+            // The desktop registry saves the account-prefixed key.
+            fs::write(
+                &creds_path,
+                r#"{"account-provider:account:bigmodel-individual-coding-plan:identity":"id-2"}"#,
+            )
+            .unwrap();
+            assert!(!zcode_needs_family_sync("bigmodel"));
+            assert!(zcode_needs_family_sync("zai"));
+
+            // Desktop-only start-plan entries never clear the sync flag.
+            fs::write(
+                &creds_path,
+                r#"{"account-provider:account:bigmodel-start-plan:identity":"id-3"}"#,
+            )
+            .unwrap();
+            assert!(zcode_needs_family_sync("bigmodel"));
+        });
+    }
+
+    #[test]
+    fn zcode_login_output_reason_keeps_the_error_not_the_url() {
+        let tail: LoginOutputTail = Arc::new(std::sync::Mutex::new(
+            "Open this URL to sign in:\nhttps://bigmodel.cn/login?appId=zcode&redirect=x\nError: fetch failed\n"
+                .to_string(),
+        ));
+        let reason = zcode_login_output_reason(&tail);
+        assert!(reason.contains("Error: fetch failed"), "{reason}");
+        assert!(!reason.contains("https://"), "{reason}");
+
+        let empty: LoginOutputTail = Arc::new(std::sync::Mutex::new(String::new()));
+        assert!(zcode_login_output_reason(&empty).contains("没有留下任何输出"));
     }
 
     #[test]

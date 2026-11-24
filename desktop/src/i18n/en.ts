@@ -2295,6 +2295,7 @@ export const en = {
     "native.usingDone": "{tool} now uses {account}.",
     "native.reverted": "{tool} now uses {name}, not {account}.",
     "native.incomplete": "Sign-in did not finish. If you are already signed in, click Continue in the browser.",
+    "native.incompleteDetail": "Sign-in did not finish. {detail}",
     "native.openedCli": "The command line is open. Sign in there, then come back here.",
     "native.unreachable": "This network cannot open the sign-in page. Switch to a network that can, then try again.",
     "native.missingCodex": "Install Codex first.",
