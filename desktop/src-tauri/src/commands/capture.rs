@@ -1,4 +1,6 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -235,7 +237,7 @@ fn stay_with_island(app: &AppHandle, from_external: bool) -> bool {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, from_external);
-        return false;
+        false
     }
     #[cfg(target_os = "macos")]
     {

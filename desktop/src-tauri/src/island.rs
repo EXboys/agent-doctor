@@ -1868,6 +1868,7 @@ fn open_island_card(app: &AppHandle) {
 
 /// The shot stays on the current desktop. The conversation window is created
 /// in the background when it is missing, and it is not shown or focused.
+#[cfg(target_os = "macos")]
 pub(crate) fn island_bar_enabled(app: &AppHandle) -> bool {
     ensure_hide_pref_loaded(app);
     app.state::<IslandHost>()
