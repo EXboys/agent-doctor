@@ -4,10 +4,11 @@
 //! windows hide so the page can use the screen. The notch stays up.
 //!
 //! On Windows there is no housing. A rounded chip sits just under the top of
-//! the work area, and only while a turn is running and the conversation window
-//! is not the one in front. It does not hide the other windows. The person can
-//! drag that chip anywhere on its screen; the spot is remembered until it no
-//! longer fits.
+//! the work area while a turn needs to be seen. A click grows it into the same
+//! card used on macOS (feed, questions, a short reply). It does not hide the
+//! other windows, and screenshot-ask still opens in the conversation. The
+//! person can drag the chip anywhere on its screen; the spot is remembered
+//! until it no longer fits.
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
@@ -266,11 +267,30 @@ pub(crate) fn island_chrome(
 }
 
 /// Windows shows a short chip whenever a turn needs to be seen, including
-/// while the conversation window is in front. It does not grow into a card.
+/// while the conversation window is in front. A sticky click (or hover after
+/// expand) grows it into a card. Auto-open only for questions that are not
+/// Allow/Deny — those buttons already live in the conversation window.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn windows_status_chrome(_ask_in_front: bool, awake: bool) -> Chrome {
+pub(crate) fn windows_status_chrome(
+    ask_in_front: bool,
+    hovering: bool,
+    attention: bool,
+    composing: bool,
+    folded: bool,
+    opened: bool,
+    awake: bool,
+) -> Chrome {
     if !awake {
-        Chrome::Hidden
+        return Chrome::Hidden;
+    }
+    // Coming back to the conversation clears hover/opened in `apply_once`.
+    // While Ask is already in front, keep a short chip unless the person
+    // explicitly opened the card again.
+    if ask_in_front && !hovering && !opened {
+        return Chrome::Pill;
+    }
+    if hovering || opened || (attention && !composing && !folded) {
+        Chrome::Peek
     } else {
         Chrome::Pill
     }
@@ -519,10 +539,20 @@ fn apply_once(app: &AppHandle) {
         }
         let awake = island_awake(&guard.snapshot);
         let enabled = guard.enabled;
-        #[cfg(not(windows))]
         let attention = pending_opens_card(guard.snapshot.pending.as_ref());
         #[cfg(windows)]
-        let chrome = chrome_if_enabled(enabled, windows_status_chrome(ask_in_front, awake));
+        let chrome = chrome_if_enabled(
+            enabled,
+            windows_status_chrome(
+                ask_in_front,
+                guard.hovering,
+                attention,
+                guard.snapshot.composing,
+                guard.folded,
+                guard.opened,
+                awake,
+            ),
+        );
         #[cfg(not(windows))]
         let chrome = chrome_if_enabled(
             enabled,
@@ -1059,7 +1089,9 @@ fn chip_position_on_monitor(
     }
 }
 
-/// Move the Windows chip. A commit remembers the spot; a drag only follows the pointer.
+/// Move the Windows chip or expanded card. A commit remembers the spot; a drag
+/// only follows the pointer. Size follows the current chrome so a Peek drag
+/// does not clamp as if it were still the short bar.
 fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool) {
     #[cfg(windows)]
     {
@@ -1079,7 +1111,8 @@ fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool)
         let Some(window) = app.get_webview_window(label) else {
             return;
         };
-        let (x, y) = clamp_chip_to_work(x, y, CHIP_WIDTH, CHIP_HEIGHT, work);
+        let (width, height) = status_chip_drag_size(app, &window, work.w);
+        let (x, y) = clamp_chip_to_work(x, y, width, height, work);
         let key = work_key(monitor);
         let persist = {
             let host = app.state::<IslandHost>();
@@ -1095,8 +1128,8 @@ fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool)
                 (
                     x.round() as i32,
                     y.round() as i32,
-                    CHIP_WIDTH.round() as i32,
-                    CHIP_HEIGHT.round() as i32,
+                    width.round() as i32,
+                    height.round() as i32,
                 ),
             );
             commit.then(|| guard.chip_place.clone())
@@ -1109,6 +1142,38 @@ fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool)
     #[cfg(not(windows))]
     {
         let _ = (app, label, x, y, commit);
+    }
+}
+
+/// Logical size used while dragging. Prefer the live window; fall back to the
+/// chip or Peek frame so the first move after expand still clamps correctly.
+#[cfg(windows)]
+fn status_chip_drag_size(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    work_w: f64,
+) -> (f64, f64) {
+    if let (Ok(size), Ok(scale)) = (window.outer_size(), window.scale_factor()) {
+        if scale > 0.0 {
+            let width = size.width as f64 / scale;
+            let height = size.height as f64 / scale;
+            if width >= CHIP_WIDTH - 1.0 && height >= CHIP_HEIGHT - 1.0 {
+                return (width, height);
+            }
+        }
+    }
+    let host = app.state::<IslandHost>();
+    let guard = host.inner.lock().expect("island");
+    if guard.last_view.expanded {
+        let width = PEEK_WIDTH.min((work_w - 32.0).max(320.0));
+        let height = if guard.content_height > 0.0 {
+            guard.content_height.clamp(120.0, PEEK_HEIGHT)
+        } else {
+            PEEK_HEIGHT
+        };
+        (width, height)
+    } else {
+        (CHIP_WIDTH, CHIP_HEIGHT)
     }
 }
 
@@ -1626,6 +1691,21 @@ fn release_island_keyboard(_app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn release_island_keyboard(_app: &AppHandle) {}
 
+/// Focus the island window so the reply field can take IME input. The chip
+/// stays NOACTIVATE while idle; only an explicit claim brings the keyboard.
+#[cfg(windows)]
+fn claim_island_keyboard(app: &AppHandle) {
+    let windows = island_windows(app);
+    let target = windows
+        .iter()
+        .find(|window| window.is_visible().unwrap_or(false))
+        .or_else(|| windows.first());
+    let Some(window) = target else {
+        return;
+    };
+    let _ = window.set_focus();
+}
+
 #[cfg(target_os = "macos")]
 fn panel_at(point: objc2_foundation::NSPoint) -> Option<*mut objc2_app_kit::NSWindow> {
     use objc2_app_kit::NSWindow;
@@ -2090,7 +2170,9 @@ pub fn island_claim_keyboard_command(app: AppHandle) -> Result<(), String> {
             let _ = rx.recv_timeout(Duration::from_millis(400));
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    hop(&app, claim_island_keyboard);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = app;
     Ok(())
 }
@@ -2341,17 +2423,51 @@ mod tests {
 
     #[test]
     fn windows_keeps_the_chip_while_the_conversation_is_in_front() {
-        assert_eq!(windows_status_chrome(true, true), Chrome::Pill);
+        assert_eq!(
+            windows_status_chrome(true, false, false, false, false, false, true),
+            Chrome::Pill
+        );
     }
 
     #[test]
     fn windows_hides_the_chip_while_nothing_is_running() {
-        assert_eq!(windows_status_chrome(false, false), Chrome::Hidden);
+        assert_eq!(
+            windows_status_chrome(false, false, false, false, false, false, false),
+            Chrome::Hidden
+        );
     }
 
     #[test]
     fn windows_shows_a_chip_when_the_conversation_is_covered() {
-        assert_eq!(windows_status_chrome(false, true), Chrome::Pill);
+        assert_eq!(
+            windows_status_chrome(false, false, false, false, false, false, true),
+            Chrome::Pill
+        );
+    }
+
+    #[test]
+    fn windows_opens_a_card_on_a_sticky_click() {
+        assert_eq!(
+            windows_status_chrome(false, false, false, false, false, true, true),
+            Chrome::Peek
+        );
+        assert_eq!(
+            windows_status_chrome(true, false, false, false, false, true, true),
+            Chrome::Peek
+        );
+    }
+
+    #[test]
+    fn windows_opens_a_card_for_a_typed_question() {
+        assert_eq!(
+            windows_status_chrome(false, false, true, false, false, false, true),
+            Chrome::Peek
+        );
+        // Allow/Deny stays on the conversation window; attention is false there.
+        assert_eq!(
+            windows_status_chrome(false, false, false, false, false, false, true),
+            Chrome::Pill
+        );
     }
 
     #[test]

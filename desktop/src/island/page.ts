@@ -19,7 +19,6 @@ import {
   islandSetHideWhenIdle,
   islandHideWhenIdle,
   islandPlaceChip,
-  islandRestore,
   currentIslandShot,
   islandClearShot,
   islandForgetShot,
@@ -1452,7 +1451,12 @@ function bindStatusChipDrag(rootEl: HTMLElement | null): void {
     root.classList.remove("is-dragging");
     if (!current.moved) {
       gesture = null;
-      if (restoreOnClick) void islandRestore().catch(() => {});
+      if (!restoreOnClick) return;
+      // Collapsed chip → open the card. Expanded → leave it; use
+      // 「在对话里打开」when the person wants the full window.
+      if (!root.classList.contains("is-expanded")) {
+        setHover(true, true);
+      }
       return;
     }
     if (current.originReady) {
@@ -1969,8 +1973,9 @@ function boot(): void {
     // Cancelling mousedown also cancels the click, so buttons such as
     // 「查看更多」 would never run.
     if (!onControl) event.preventDefault();
-    // Windows moves the chip with the pointer, and a click with almost no
-    // movement still returns to the conversation.
+    // Windows expands from the chip drag gesture (click with almost no
+    // movement). Hover-to-peek stays off so dragging the chip does not
+    // accidentally grow into a card.
     if (document.documentElement.classList.contains("is-status-chip")) return;
     setHover(true, true);
   });

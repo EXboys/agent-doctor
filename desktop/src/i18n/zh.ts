@@ -444,7 +444,7 @@ export const zh = {
     "chat.settingsThemeHint": "问答页面的明暗",
     "chat.settingsThemeSystem": "跟随系统",
     "chat.settingsIsland": "灵动岛",
-    "chat.settingsIslandHint": "屏幕最上方的黑条。关掉后，对话进行时也不再出现。",
+    "chat.settingsIslandHint": "屏幕上方的状态条，点一下能展开处理。关掉后，对话进行时也不再出现。",
     "chat.settingsHideIdle": "空闲时隐藏",
     "chat.settingsHideIdleHint": "没有对话在进行时，顶部黑条会消失。",
     "chat.settingsConversation": "对话",

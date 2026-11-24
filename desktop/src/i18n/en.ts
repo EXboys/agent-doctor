@@ -444,7 +444,7 @@ export const en = {
     "chat.settingsThemeHint": "How light or dark this chat looks",
     "chat.settingsThemeSystem": "Match this computer",
     "chat.settingsIsland": "Top bar",
-    "chat.settingsIslandHint": "The black bar at the top of the screen. Turn it off and it stays away, even while a conversation is running.",
+    "chat.settingsIslandHint": "The status bar at the top of the screen. Click it to open a card. Turn it off and it stays away, even while a conversation is running.",
     "chat.settingsHideIdle": "Hide when idle",
     "chat.settingsHideIdleHint": "The top bar goes away while no conversation is running.",
     "chat.settingsConversation": "Chat",
