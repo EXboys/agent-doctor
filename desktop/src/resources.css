@@ -7,6 +7,29 @@ html[data-os="windows"] .resources-rail {
   flex-basis: 176px;
 }
 
+/* Caption buttons sit on the window corner. The panel has to meet that
+   corner, or the buttons float in the margin beside the card. */
+html[data-os="windows"] .resources-main {
+  padding-top: 0;
+  padding-right: 0;
+}
+
+html[data-os="windows"] .resources-module {
+  border-top-right-radius: 0;
+}
+
+html[data-os="windows"] .resources-main-head {
+  padding-top: 0;
+  padding-right: 0;
+}
+
+/* The first row is the caption-button row on every section. A short title
+   (Agent, 浏览器) must still hold that height, or the search wraps up into
+   the buttons. */
+html[data-os="windows"] .resources-toolbar-left {
+  min-height: var(--window-controls-h);
+}
+
 html[data-os="windows"] .resources-section-tab {
   font-weight: 600;
   letter-spacing: 0;
@@ -133,21 +156,25 @@ html[data-os="windows"] .resources-section-tab {
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px 10px;
+  container-type: inline-size;
+  container-name: resources-head;
 }
 
 .resources-toolbar-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px 16px;
   min-width: 0;
 }
 
 .resources-toolbar-left {
   display: flex;
   align-items: center;
-  min-width: 0;
-  flex: 1;
+  flex: 1 1 260px;
+  min-width: min(100%, 220px);
+  max-width: 100%;
 }
 
 .resources-panel-lead {
@@ -164,10 +191,32 @@ html[data-os="windows"] .resources-section-tab {
 }
 
 .resources-main-head .resources-search {
-  flex: 0 0 auto;
-  width: min(280px, 38vw);
+  flex: 1 1 220px;
+  width: auto;
+  min-width: min(100%, 180px);
   max-width: 280px;
   margin-left: auto;
+}
+
+/* Caption buttons eat the top-right. Below this width the tabs and the
+   search no longer fit on one line, so the search takes the next line. */
+@container resources-head (max-width: 620px) {
+  .resources-toolbar-left {
+    flex: 1 1 100%;
+  }
+
+  .resources-scope-tabs {
+    width: min(100%, 320px);
+    min-width: 0;
+  }
+
+  .resources-main-head .resources-search {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    margin-left: 0;
+  }
 }
 
 .res-catalog-group {
@@ -319,8 +368,10 @@ html[data-os="windows"] .resources-section-tab {
 .resources-scope-tabs {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
-  flex: 0 0 auto;
-  min-width: 248px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 4px;
   padding: 4px;
   border-radius: 12px;
@@ -332,9 +383,10 @@ html[data-os="windows"] .resources-section-tab {
   align-items: center;
   justify-content: center;
   gap: 7px;
+  min-width: 0;
   border: 0;
   border-radius: 9px;
-  padding: 8px 16px;
+  padding: 8px 12px;
   background: transparent;
   color: var(--muted, #667085);
   font: inherit;
@@ -342,6 +394,12 @@ html[data-os="windows"] .resources-section-tab {
   font-weight: 650;
   line-height: 1.2;
   cursor: pointer;
+}
+
+.resources-scope-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .resources-scope-tab-icon {

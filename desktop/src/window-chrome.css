@@ -179,3 +179,18 @@ html.is-opaque-shell[data-os="windows"] .resources-toolbar-row,
 html[data-os="windows"] .resources-toolbar-row {
   padding-right: calc(var(--window-controls-w) + 4px);
 }
+
+/* Narrow: the search sits on the next line, under the caption buttons.
+   Only the tab row needs the right gutter. */
+@container resources-head (max-width: 620px) {
+  html.is-opaque-shell[data-os="windows"] .resources-toolbar-row,
+  html[data-os="windows"] .resources-toolbar-row {
+    padding-right: 0;
+  }
+
+  html.is-opaque-shell[data-os="windows"] .resources-toolbar-left,
+  html[data-os="windows"] .resources-toolbar-left {
+    padding-right: calc(var(--window-controls-w) + 4px);
+    box-sizing: border-box;
+  }
+}

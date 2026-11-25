@@ -500,6 +500,7 @@ function openFocusedSection(section?: string | null): void {
   else if (section === "skills" || section === "catalog") setSection("skills");
 }
 
+document.documentElement.classList.add("is-opaque-shell");
 mountWindowChrome();
 applyI18n();
 bindLocaleSync(() => applyI18n());
