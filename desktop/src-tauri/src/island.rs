@@ -613,6 +613,9 @@ fn defer_ui(app: &AppHandle, job: impl FnOnce(&AppHandle) + Send + 'static) {
     }
 }
 
+// Windows 分支的屏幕跟随走 `flush_ui`（0.1.100-beta.21 起），唯一的剩余调用在
+// not(windows) 的 `refresh_notch_screens` 和 macOS 的 `fold_if_click_is_outside`。
+#[cfg(not(windows))]
 fn apply(app: &AppHandle) {
     if !cfg!(any(target_os = "macos", windows)) {
         return;
