@@ -171,6 +171,14 @@ html[data-theme="dark"] .chat-account-menu-item.is-logout:hover {
   border-color: var(--line);
 }
 
+#chat-phone-open.is-live {
+  color: #14804a;
+}
+
+html[data-theme="dark"] #chat-phone-open.is-live {
+  color: #7ddea8;
+}
+
 /* Page modes keep the three-column grid while expanded. Knowledge, schedule
    and resources collapse through the base is-side-collapsed single-column
    rule; settings pins the rail in every state. */

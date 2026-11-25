@@ -611,6 +611,18 @@ export function createBubblesController(deps: BubblesDeps) {
       return "other";
     });
     const owners = assistantTurnCopyOwners(roles);
+    // The open turn is still the work. Copy and rating on a middle sentence
+    // hang over the next step. Earlier turns keep theirs.
+    if (deps.getBusy() && deps.isViewingRunningSession()) {
+      let start = 0;
+      for (let i = roles.length - 1; i >= 0; i -= 1) {
+        if (roles[i] === "user") {
+          start = i + 1;
+          break;
+        }
+      }
+      for (let i = start; i < owners.length; i += 1) owners[i] = false;
+    }
     children.forEach((child, index) => {
       if (roles[index] !== "assistant") return;
       const wrap = child as HTMLElement;
@@ -1502,6 +1514,7 @@ export function createBubblesController(deps: BubblesDeps) {
     updateAssistantMessage,
     assistantMarkdownSource,
     syncAssistantCopyButton,
+    syncTurnActions: syncTurnCopyButtons,
     createAssistantBubbleEl,
     createUserBubbleEl,
     setAssistantMarkdown,

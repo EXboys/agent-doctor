@@ -857,8 +857,9 @@ export function setBusy(next: boolean, chatSessionId?: string | null): void {
     }
     if (chatState.assistantBubble?.isConnected) {
       chatState.assistantBubble.classList.remove("is-streaming");
-      syncAssistantCopyButton(chatState.assistantBubble);
     }
+    // This round hid copy and rating while it was still running. Put them back on the finished answer.
+    chatState.bubbles.syncTurnActions();
     chatState.assistantBubble = null;
     chatState.assistantMessageId = null;
     chatState.assistantRaw = "";

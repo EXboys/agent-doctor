@@ -55,11 +55,16 @@ function paintAccount(signedInName: string, signedIn = false): void {
 
 export function syncAccountBarLabels(): void {
   const update = document.querySelector<HTMLButtonElement>("#chat-update");
+  const phone = document.querySelector<HTMLButtonElement>("#chat-phone-open");
   const settings = document.querySelector<HTMLButtonElement>("#chat-settings-open");
   const nameEl = document.querySelector<HTMLElement>("#chat-account-name");
   if (update) {
     update.textContent = t("chat.updateReady");
     update.title = t("chat.updateReadyHint");
+  }
+  if (phone) {
+    phone.title = t("chat.settingsChannel");
+    phone.setAttribute("aria-label", t("chat.settingsChannel"));
   }
   if (settings) {
     settings.title = t("chat.settings");

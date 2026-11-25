@@ -664,6 +664,7 @@ function bootChatTail(): void {
     if (!el) return;
     const live = channelEnabled && channelSignedIn && channelOn;
     el.classList.toggle("is-on", live);
+    document.querySelector("#chat-phone-open")?.classList.toggle("is-live", live);
     if (!channelEnabled) el.textContent = t("chat.settingsChannelClosed");
     else if (!channelSignedIn) el.textContent = t("chat.settingsChannelSignedOut");
     else el.textContent = channelOn ? t("chat.settingsChannelOn") : t("chat.settingsChannelOff");

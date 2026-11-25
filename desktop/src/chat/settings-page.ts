@@ -55,7 +55,7 @@ function markChoice(attr: "settingsTheme" | "settingsLocale", value: string): vo
   });
 }
 
-const SECTIONS = ["appearance", "conversation", "control", "language", "channel", "feedback", "about"] as const;
+const SECTIONS = ["appearance", "conversation", "control", "phone", "language", "feedback", "about"] as const;
 type SettingsSection = (typeof SECTIONS)[number];
 
 let activeSection: SettingsSection = "appearance";
@@ -98,7 +98,9 @@ export function openChatSettings(
   }
   openEl()?.classList.add("is-on");
   openEl()?.setAttribute("aria-pressed", "true");
-  if (section === "control") {
+  if (section === "phone") {
+    document.querySelector<HTMLInputElement>("#chat-settings-channel-switch")?.focus();
+  } else if (section === "control") {
     const focusId = focus === "computer" ? "#chat-settings-computer" : "#chat-settings-browser";
     document.querySelector<HTMLInputElement>(focusId)?.focus();
   } else if (section === "conversation" && focus === "knowledge") {
@@ -110,7 +112,7 @@ function sectionTitle(section: SettingsSection): string {
   if (section === "language") return t("chat.settingsLanguage");
   if (section === "conversation") return t("chat.settingsConversation");
   if (section === "control") return t("chat.settingsControl");
-  if (section === "channel") return t("chat.settingsChannels");
+  if (section === "phone") return t("chat.settingsChannel");
   if (section === "feedback") return t("chat.feedbackTitle");
   if (section === "about") return t("chat.settingsAbout");
   return t("chat.settingsAppearance");
@@ -375,6 +377,7 @@ function syncChatSettings(): void {
   syncVoiceChoice();
   syncIslandSwitch();
   syncAbout();
+  document.querySelector("#chat-settings-phone-qr")?.setAttribute("aria-label", t("chat.settingsPhoneDownload"));
   showSection(activeSection);
 }
 
@@ -382,6 +385,9 @@ export function bindChatSettings(applyI18n: () => void): void {
   openEl()?.addEventListener("click", () => {
     if (isChatSettingsOpen()) closeChatSettings();
     else openChatSettings();
+  });
+  document.querySelector("#chat-phone-open")?.addEventListener("click", () => {
+    openChatSettings("phone");
   });
   backEl()?.addEventListener("click", () => closeChatSettings());
   document.querySelector(".chat-settings-menu")?.addEventListener("click", (event) => {

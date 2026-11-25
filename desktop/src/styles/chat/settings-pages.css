@@ -130,6 +130,30 @@
   overflow: hidden;
 }
 
+.chat-settings-phone-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 12px;
+  padding: 16px;
+}
+
+.chat-settings-phone-qr {
+  flex: none;
+  width: 132px;
+  height: 132px;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+}
+
+.chat-settings-phone-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .chat-settings-row {
   display: flex;
   align-items: center;
@@ -250,11 +274,16 @@
   flex: 1 1 0;
 }
 
+.chat-settings-mark,
 .chat-settings-feishu {
   flex: none;
   width: 36px;
   height: 36px;
   border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.16);
+}
+
+.chat-settings-feishu {
   box-shadow: 0 6px 14px rgba(51, 112, 255, 0.28);
 }
 

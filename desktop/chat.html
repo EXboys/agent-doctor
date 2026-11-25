@@ -165,6 +165,19 @@
               </svg>
             </button>
             <button
+              id="chat-phone-open"
+              type="button"
+              class="chat-settings-open"
+              aria-label="手机控制"
+              title="手机控制"
+              data-i18n-title="chat.settingsChannel"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="7" y="3.5" width="10" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M10 6.5h4M11.2 17.5h1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button
               id="chat-settings-open"
               type="button"
               class="chat-settings-open"
@@ -269,13 +282,13 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                 <span data-i18n="chat.settingsControl">控制</span>
               </button>
+              <button type="button" class="chat-settings-nav-item" data-settings-nav="phone">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M10 6.5h4M11.2 17.5h1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <span data-i18n="chat.settingsChannel">手机控制</span>
+              </button>
               <button type="button" class="chat-settings-nav-item" data-settings-nav="language">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h10M9 6c0 6-2.5 9.5-6 12M9 6c1.2 2.4 2.2 4.2 2.8 6.2M14 18l2.2-6L18.5 18M15.1 16h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <span data-i18n="chat.settingsLanguage">语言</span>
-              </button>
-              <button type="button" class="chat-settings-nav-item" data-settings-nav="channel">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="7" cy="8" r="2.1" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="8" r="2.1" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="16.5" r="2.1" stroke="currentColor" stroke-width="1.6"/><path d="M8.8 9.2 10.6 14.6M15.2 9.2 13.4 14.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-                <span data-i18n="chat.settingsChannels">渠道</span>
               </button>
               <button type="button" class="chat-settings-nav-item" data-settings-nav="feedback">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -390,9 +403,18 @@
             <section class="chat-settings-panel" data-settings-panel="control" hidden>
               <div class="chat-settings-card">
                 <div class="chat-settings-row">
-                  <div class="chat-settings-copy">
-                    <strong data-i18n="chat.settingsComputer">操作这台电脑</strong>
-                    <span id="chat-settings-computer-hint" data-i18n="chat.settingsComputerHint">打开后，助手可以点这台电脑上的其他软件。默认关着。</span>
+                  <div class="chat-settings-channel-id">
+                    <svg class="chat-settings-mark" viewBox="0 0 36 36" aria-hidden="true">
+                      <rect width="36" height="36" rx="10" fill="#5C6F86"/>
+                      <g fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="8" y="8.5" width="20" height="13.5" rx="2"/>
+                        <path d="M14 26.5h8M18 22v4.5"/>
+                      </g>
+                    </svg>
+                    <div class="chat-settings-copy">
+                      <strong data-i18n="chat.settingsComputer">操作这台电脑</strong>
+                      <span id="chat-settings-computer-hint" data-i18n="chat.settingsComputerHint">打开后，助手可以点这台电脑上的其他软件。默认关着。</span>
+                    </div>
                   </div>
                   <input
                     id="chat-settings-computer"
@@ -403,9 +425,20 @@
                   />
                 </div>
                 <div class="chat-settings-row">
-                  <div class="chat-settings-copy">
-                    <strong data-i18n="chat.settingsBrowser">操作网页</strong>
-                    <span id="chat-settings-browser-hint" data-i18n="chat.settingsBrowserHint">打开后，助手可以打开网页、点页面、填字。默认关着。</span>
+                  <div class="chat-settings-channel-id">
+                    <svg class="chat-settings-mark" viewBox="0 0 36 36" aria-hidden="true">
+                      <rect width="36" height="36" rx="10" fill="#3E7C78"/>
+                      <g fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="8" y="9" width="20" height="16" rx="2.5"/>
+                        <path d="M8 13.5h20"/>
+                      </g>
+                      <circle cx="11.2" cy="11.25" r="0.9" fill="#fff"/>
+                      <circle cx="14.4" cy="11.25" r="0.9" fill="#fff"/>
+                    </svg>
+                    <div class="chat-settings-copy">
+                      <strong data-i18n="chat.settingsBrowser">操作网页</strong>
+                      <span id="chat-settings-browser-hint" data-i18n="chat.settingsBrowserHint">打开后，助手可以打开网页、点页面、填字。默认关着。</span>
+                    </div>
                   </div>
                   <input
                     id="chat-settings-browser"
@@ -415,6 +448,21 @@
                     aria-label="操作网页"
                   />
                 </div>
+              </div>
+            </section>
+            <section class="chat-settings-panel" data-settings-panel="phone" hidden>
+              <div class="chat-settings-card chat-settings-phone-card">
+                <div id="chat-settings-phone-qr" class="chat-settings-phone-qr" role="img" aria-label="下载手机 App">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 31" shape-rendering="crispEdges" aria-hidden="true">
+                    <path stroke="#111111" d="M1 1.5h7m2 0h2m3 0h1m2 0h4m1 0h7M1 2.5h1m5 0h1m1 0h1m2 0h3m4 0h2m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h1m1 0h1m2 0h1m3 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h2m1 0h1m2 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h4m1 0h7m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M16 8.5h1m1 0h1M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1m3 0h2m2 0h1m3 0h1m2 0h1M2 10.5h2m1 0h2m1 0h2m1 0h1m2 0h1m1 0h2m3 0h1m1 0h1m2 0h1m2 0h1M7 11.5h1m4 0h1m2 0h4m2 0h3m3 0h3M5 12.5h2m1 0h2m1 0h1m2 0h2m1 0h3m1 0h2m2 0h1m2 0h1M3 13.5h1m2 0h5m1 0h2m1 0h2m1 0h1m1 0h4m2 0h1m1 0h2M1 14.5h3m1 0h2m3 0h2m3 0h2m1 0h2m2 0h2m2 0h1m2 0h1M4 15.5h5m1 0h1m1 0h3m3 0h1m2 0h6m1 0h2M1 16.5h2m2 0h1m4 0h1m1 0h2m2 0h1m1 0h2m2 0h1m3 0h1m1 0h1M2 17.5h1m1 0h1m1 0h4m1 0h1m1 0h1m3 0h2m3 0h2m2 0h1m1 0h2M3 18.5h2m3 0h1m3 0h3m1 0h2m3 0h3m2 0h2m1 0h1M1 19.5h1m2 0h1m2 0h5m3 0h4m3 0h1m1 0h1m3 0h2M2 20.5h5m4 0h5m1 0h2m2 0h1m1 0h1m2 0h1m1 0h1M1 21.5h1m2 0h1m2 0h1m1 0h2m2 0h1m1 0h4m1 0h6M9 22.5h1m5 0h2m3 0h2m3 0h1m1 0h3M1 23.5h7m2 0h1m2 0h2m2 0h1m2 0h2m1 0h1m1 0h2m1 0h2M1 24.5h1m5 0h1m5 0h1m2 0h3m2 0h1m3 0h2m2 0h1M1 25.5h1m1 0h3m1 0h1m1 0h3m1 0h1m3 0h2m2 0h5m2 0h1M1 26.5h1m1 0h3m1 0h1m2 0h1m2 0h2m2 0h1m2 0h1m3 0h2m1 0h1M1 27.5h1m1 0h3m1 0h1m1 0h1m1 0h2m5 0h1m1 0h2m2 0h3m2 0h1M1 28.5h1m5 0h1m2 0h1m3 0h1m1 0h1m1 0h2m1 0h2m5 0h1M1 29.5h7m1 0h2m2 0h2m2 0h2m1 0h3m2 0h1m2 0h2"/>
+                  </svg>
+                </div>
+                <div class="chat-settings-copy">
+                  <strong data-i18n="chat.settingsPhoneDownload">下载手机 App</strong>
+                  <span data-i18n="chat.settingsPhoneDownloadHint">用手机相机扫这个码，打开下载页，装上手机 App。装好后登录同一个账号。</span>
+                </div>
+              </div>
+              <div class="chat-settings-card">
                 <div class="chat-settings-row chat-settings-channel-row">
                   <div class="chat-settings-channel-id">
                     <svg class="chat-settings-feishu" viewBox="0 0 36 36" aria-hidden="true">
@@ -442,24 +490,6 @@
                     />
                   </div>
                 </div>
-              </div>
-            </section>
-            <section class="chat-settings-panel" data-settings-panel="language" hidden>
-              <div class="chat-settings-card">
-                <div class="chat-settings-row">
-                  <div class="chat-settings-copy">
-                    <strong data-i18n="chat.settingsLanguageLabel">界面文字</strong>
-                    <span data-i18n="chat.settingsLanguageHint">按钮和说明用哪种文字</span>
-                  </div>
-                  <div class="chat-mode chat-settings-tabs" role="tablist" aria-label="界面文字">
-                    <button type="button" class="chat-mode-btn is-on" role="tab" data-settings-locale="zh" aria-selected="true">中文</button>
-                    <button type="button" class="chat-mode-btn" role="tab" data-settings-locale="en">English</button>
-                  </div>
-                </div>
-              </div>
-            </section>
-            <section class="chat-settings-panel" data-settings-panel="channel" hidden>
-              <div class="chat-settings-card">
                 <div class="chat-settings-row chat-settings-channel-row">
                   <div class="chat-settings-channel-id">
                     <svg class="chat-settings-feishu" viewBox="0 0 36 36" aria-hidden="true">
@@ -484,6 +514,20 @@
                       role="switch"
                       aria-label="同步会话到手机"
                     />
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="chat-settings-panel" data-settings-panel="language" hidden>
+              <div class="chat-settings-card">
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsLanguageLabel">界面文字</strong>
+                    <span data-i18n="chat.settingsLanguageHint">按钮和说明用哪种文字</span>
+                  </div>
+                  <div class="chat-mode chat-settings-tabs" role="tablist" aria-label="界面文字">
+                    <button type="button" class="chat-mode-btn is-on" role="tab" data-settings-locale="zh" aria-selected="true">中文</button>
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-locale="en">English</button>
                   </div>
                 </div>
               </div>

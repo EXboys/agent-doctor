@@ -490,6 +490,8 @@ export const zh = {
     "chat.settingsChannels": "渠道",
     "chat.settingsAbout": "关于",
     "chat.settingsVersion": "当前版本",
+    "chat.settingsPhoneDownload": "下载手机 App",
+    "chat.settingsPhoneDownloadHint": "用手机相机扫这个码，打开下载页，装上手机 App。装好后登录同一个账号。",
     "chat.settingsChannel": "手机控制",
     "chat.settingsChannelHint": "手机 App 和飞书都走这条线：把任务发给这台电脑、取回结果。关掉就彻底断开。",
     "chat.settingsChannelSwitch": "手机控制",

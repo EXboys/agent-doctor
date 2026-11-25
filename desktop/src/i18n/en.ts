@@ -490,6 +490,8 @@ export const en = {
     "chat.settingsChannels": "Channels",
     "chat.settingsAbout": "About",
     "chat.settingsVersion": "Current version",
+    "chat.settingsPhoneDownload": "Download the phone app",
+    "chat.settingsPhoneDownloadHint": "Scan this code with the phone camera to open the download page and install the app. Then sign in with the same account.",
     "chat.settingsChannel": "Phone control",
     "chat.settingsChannelHint": "The phone app and Feishu both use this line: send tasks to this computer and get results back. Turn off to disconnect fully.",
     "chat.settingsChannelSwitch": "Phone control",
