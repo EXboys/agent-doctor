@@ -55,7 +55,7 @@ function markChoice(attr: "settingsTheme" | "settingsLocale", value: string): vo
   });
 }
 
-const SECTIONS = ["appearance", "conversation", "language", "channel", "about"] as const;
+const SECTIONS = ["appearance", "conversation", "control", "language", "channel", "feedback", "about"] as const;
 type SettingsSection = (typeof SECTIONS)[number];
 
 let activeSection: SettingsSection = "appearance";
@@ -98,22 +98,20 @@ export function openChatSettings(
   }
   openEl()?.classList.add("is-on");
   openEl()?.setAttribute("aria-pressed", "true");
-  if (section === "conversation") {
-    const focusId =
-      focus === "browser"
-        ? "#chat-settings-browser"
-        : focus === "computer"
-          ? "#chat-settings-computer"
-          : "#chat-settings-knowledge-sync";
+  if (section === "control") {
+    const focusId = focus === "computer" ? "#chat-settings-computer" : "#chat-settings-browser";
     document.querySelector<HTMLInputElement>(focusId)?.focus();
-  }
-  else searchEl()?.focus();
+  } else if (section === "conversation" && focus === "knowledge") {
+    document.querySelector<HTMLInputElement>("#chat-settings-knowledge-sync")?.focus();
+  } else searchEl()?.focus();
 }
 
 function sectionTitle(section: SettingsSection): string {
   if (section === "language") return t("chat.settingsLanguage");
   if (section === "conversation") return t("chat.settingsConversation");
+  if (section === "control") return t("chat.settingsControl");
   if (section === "channel") return t("chat.settingsChannels");
+  if (section === "feedback") return t("chat.feedbackTitle");
   if (section === "about") return t("chat.settingsAbout");
   return t("chat.settingsAppearance");
 }
@@ -389,7 +387,7 @@ export function bindChatSettings(applyI18n: () => void): void {
   document.querySelector(".chat-settings-menu")?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-nav]");
     const next = button?.dataset.settingsNav;
-    if (next === "appearance" || next === "conversation" || next === "language" || next === "channel" || next === "about") showSection(next);
+    if (next && (SECTIONS as readonly string[]).includes(next)) showSection(next as SettingsSection);
   });
   searchEl()?.addEventListener("input", () => showSection(activeSection));
   islandEl()?.addEventListener("change", () => {

@@ -80,16 +80,20 @@ export type ImportDeps = {
   status: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
 };
 
-/** The sidebar entry: a small button that opens the source picker. */
-export function transcriptImportEntry(deps: ImportDeps): HTMLElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "chat-import-entry";
-  button.textContent = t("chat.importEntry");
+let importBound = false;
+
+/** The account-bar icon that opens the source picker. Safe to call on every list render. */
+export function transcriptImportEntry(deps: ImportDeps): void {
+  const button = document.querySelector<HTMLButtonElement>("#chat-import-open");
+  if (!button) return;
+  const label = t("chat.importEntry");
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  if (importBound) return;
+  importBound = true;
   button.addEventListener("click", () => {
     void openTranscriptImportDialog(deps);
   });
-  return button;
 }
 
 async function openTranscriptImportDialog(deps: ImportDeps): Promise<void> {

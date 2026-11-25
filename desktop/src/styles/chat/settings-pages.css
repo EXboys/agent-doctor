@@ -67,6 +67,10 @@
   margin-top: 6px;
 }
 
+.chat-settings-nav-item[hidden] {
+  display: none !important;
+}
+
 .chat-settings-nav-item {
   appearance: none;
   display: flex;

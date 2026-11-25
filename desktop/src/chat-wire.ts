@@ -549,9 +549,8 @@ export function wireChatControllers(): void {
 
   chatState.sessions = createSessionsController({
     sessionListEl,
-    renderImportEntry: (listEl) =>
-      listEl.append(
-        transcriptImportEntry({
+    renderImportEntry: () =>
+      transcriptImportEntry({
           onImported: (session) => {
             chatState.store.sessions.unshift(session);
             chatState.store.activeId = session.id;
@@ -561,7 +560,6 @@ export function wireChatControllers(): void {
           },
           status: (text, tone) => setStatus(text, tone),
         }),
-      ),
     titleEl,
     promptEl,
     logEl,

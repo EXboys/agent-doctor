@@ -151,21 +151,17 @@
             </div>
             <button id="chat-update" type="button" class="chat-update" hidden data-i18n="chat.updateReady">更新</button>
             <button
-              id="chat-feedback-open"
+              id="chat-import-open"
               type="button"
               class="chat-feedback-open"
-              aria-label="反馈问题"
-              title="反馈问题"
-              data-i18n-title="chat.fail.actionReport"
+              aria-label="导入会话"
+              title="导入会话"
+              data-i18n-title="chat.importEntry"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
+                <path d="M12 3.5v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M8.5 9.5 12 13l3.5-3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M5 15.5v2.2A1.8 1.8 0 0 0 6.8 19.5h10.4a1.8 1.8 0 0 0 1.8-1.8v-2.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
               </svg>
             </button>
             <button
@@ -269,6 +265,10 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 7.5h12M6 12h8M6 16.5H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M5 4.75h14A1.75 1.75 0 0 1 20.75 6.5v8.2a1.75 1.75 0 0 1-1.75 1.75H9.2L5.5 19.5v-3.05H5A1.75 1.75 0 0 1 3.25 14.7V6.5A1.75 1.75 0 0 1 5 4.75Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
                 <span data-i18n="chat.settingsConversation">对话</span>
               </button>
+              <button type="button" class="chat-settings-nav-item" data-settings-nav="control">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <span data-i18n="chat.settingsControl">控制</span>
+              </button>
               <button type="button" class="chat-settings-nav-item" data-settings-nav="language">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h10M9 6c0 6-2.5 9.5-6 12M9 6c1.2 2.4 2.2 4.2 2.8 6.2M14 18l2.2-6L18.5 18M15.1 16h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <span data-i18n="chat.settingsLanguage">语言</span>
@@ -276,6 +276,10 @@
               <button type="button" class="chat-settings-nav-item" data-settings-nav="channel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="7" cy="8" r="2.1" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="8" r="2.1" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="16.5" r="2.1" stroke="currentColor" stroke-width="1.6"/><path d="M8.8 9.2 10.6 14.6M15.2 9.2 13.4 14.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
                 <span data-i18n="chat.settingsChannels">渠道</span>
+              </button>
+              <button type="button" class="chat-settings-nav-item" data-settings-nav="feedback">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span data-i18n="chat.feedbackTitle">反馈问题</span>
               </button>
               <button type="button" class="chat-settings-nav-item" data-settings-nav="about">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5M12 8h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
@@ -367,32 +371,6 @@
                     aria-label="新建对话默认开启自动审批"
                   />
                 </div>
-                <div class="chat-settings-row">
-                  <div class="chat-settings-copy">
-                    <strong data-i18n="chat.settingsBrowser">操作网页</strong>
-                    <span id="chat-settings-browser-hint" data-i18n="chat.settingsBrowserHint">打开后，助手可以打开网页、点页面、填字。默认关着。</span>
-                  </div>
-                  <input
-                    id="chat-settings-browser"
-                    class="chat-settings-switch"
-                    type="checkbox"
-                    role="switch"
-                    aria-label="操作网页"
-                  />
-                </div>
-                <div class="chat-settings-row">
-                  <div class="chat-settings-copy">
-                    <strong data-i18n="chat.settingsComputer">操作这台电脑</strong>
-                    <span id="chat-settings-computer-hint" data-i18n="chat.settingsComputerHint">打开后，助手可以点这台电脑上的其他软件。默认关着。</span>
-                  </div>
-                  <input
-                    id="chat-settings-computer"
-                    class="chat-settings-switch"
-                    type="checkbox"
-                    role="switch"
-                    aria-label="操作这台电脑"
-                  />
-                </div>
                 <div class="chat-settings-row" id="chat-settings-knowledge-sync-row">
                   <div class="chat-settings-copy">
                     <strong data-i18n="chat.settingsKnowledgeSync">同步到账号</strong>
@@ -406,6 +384,63 @@
                     checked
                     aria-label="同步知识库到账号"
                   />
+                </div>
+              </div>
+            </section>
+            <section class="chat-settings-panel" data-settings-panel="control" hidden>
+              <div class="chat-settings-card">
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsComputer">操作这台电脑</strong>
+                    <span id="chat-settings-computer-hint" data-i18n="chat.settingsComputerHint">打开后，助手可以点这台电脑上的其他软件。默认关着。</span>
+                  </div>
+                  <input
+                    id="chat-settings-computer"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="操作这台电脑"
+                  />
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsBrowser">操作网页</strong>
+                    <span id="chat-settings-browser-hint" data-i18n="chat.settingsBrowserHint">打开后，助手可以打开网页、点页面、填字。默认关着。</span>
+                  </div>
+                  <input
+                    id="chat-settings-browser"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="操作网页"
+                  />
+                </div>
+                <div class="chat-settings-row chat-settings-channel-row">
+                  <div class="chat-settings-channel-id">
+                    <svg class="chat-settings-feishu" viewBox="0 0 36 36" aria-hidden="true">
+                      <rect width="36" height="36" rx="10" fill="#8A8F98"/>
+                      <g transform="translate(9 6)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+                        <rect x="4" y="3" width="10" height="19" rx="2.5"/>
+                        <path d="M8 5.5h2"/>
+                        <path d="M8.5 19h1"/>
+                      </g>
+                    </svg>
+                    <div class="chat-settings-copy">
+                      <strong data-i18n="chat.settingsChannel">手机控制</strong>
+                      <span data-i18n="chat.settingsChannelHint">手机 App 和飞书都走这条线：把任务发给这台电脑、取回结果。关掉就彻底断开。</span>
+                    </div>
+                  </div>
+                  <div class="chat-settings-channel-side">
+                    <span id="chat-settings-channel" class="chat-settings-status">还没登录，不会连接</span>
+                    <input
+                      id="chat-settings-channel-switch"
+                      class="chat-settings-switch"
+                      type="checkbox"
+                      role="switch"
+                      checked
+                      aria-label="手机控制"
+                    />
+                  </div>
                 </div>
               </div>
             </section>
@@ -425,33 +460,6 @@
             </section>
             <section class="chat-settings-panel" data-settings-panel="channel" hidden>
               <div class="chat-settings-card">
-                <div class="chat-settings-row chat-settings-channel-row">
-                  <div class="chat-settings-channel-id">
-                    <svg class="chat-settings-feishu" viewBox="0 0 36 36" aria-hidden="true">
-                      <rect width="36" height="36" rx="10" fill="#8A8F98"/>
-                      <g transform="translate(9 6)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
-                        <rect x="4" y="3" width="10" height="19" rx="2.5"/>
-                        <path d="M8 5.5h2"/>
-                        <path d="M8.5 19h1"/>
-                      </g>
-                    </svg>
-                    <div class="chat-settings-copy">
-                      <strong data-i18n="chat.settingsChannel">移动端远程控制</strong>
-                      <span data-i18n="chat.settingsChannelHint">手机 App 和飞书都走这条线：把任务发给这台电脑、取回结果。关掉就彻底断开。</span>
-                    </div>
-                  </div>
-                  <div class="chat-settings-channel-side">
-                    <span id="chat-settings-channel" class="chat-settings-status">还没登录，不会连接</span>
-                    <input
-                      id="chat-settings-channel-switch"
-                      class="chat-settings-switch"
-                      type="checkbox"
-                      role="switch"
-                      checked
-                      aria-label="移动端远程控制"
-                    />
-                  </div>
-                </div>
                 <div class="chat-settings-row chat-settings-channel-row">
                   <div class="chat-settings-channel-id">
                     <svg class="chat-settings-feishu" viewBox="0 0 36 36" aria-hidden="true">
@@ -489,6 +497,10 @@
                   </div>
                   <button id="chat-settings-update" type="button" class="chat-settings-action" data-i18n="update.check">检查更新</button>
                 </div>
+              </div>
+            </section>
+            <section class="chat-settings-panel" data-settings-panel="feedback" hidden>
+              <div class="chat-settings-card">
                 <div class="chat-settings-row">
                   <div class="chat-settings-copy">
                     <strong data-i18n="chat.feedbackTitle">反馈问题</strong>

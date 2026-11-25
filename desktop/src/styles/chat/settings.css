@@ -55,6 +55,12 @@
   pointer-events: auto;
 }
 
+/* Traffic lights keep the top row. Back sits on the next row, left-aligned
+   with the search field, the same stack as the settings sidebars we matched. */
+html[data-os="macos"]:not(.is-window-fullscreen) .chat-shell.is-settings .chat-settings-nav {
+  padding-top: 52px;
+}
+
 .chat-knowledge,
 .chat-schedule,
 .chat-resources-page {

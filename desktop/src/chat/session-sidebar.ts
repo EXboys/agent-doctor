@@ -13,6 +13,7 @@ function applySidebarCollapsed(collapsed: boolean): void {
   } catch {
     // The list still hides for this visit when storage is blocked.
   }
+  syncSidebarCollapseLabels();
 }
 
 export function bindSidebarCollapse(): void {
@@ -25,11 +26,15 @@ export function bindSidebarCollapse(): void {
       applySidebarCollapsed(true);
       return;
     }
-    // The expand button lives in the chat topbar and in each page header
-    // (knowledge, schedule, skills), so match by class.
+    // The button lives in the chat topbar and in each page header
+    // (knowledge, schedule, skills), so match by class. On Windows and macOS
+    // it stays visible and toggles; elsewhere it only appears once the list is hidden.
     if (target.closest(".chat-side-expand")) {
       event.preventDefault();
-      applySidebarCollapsed(false);
+      const collapsed = document.querySelector("#chat-shell")?.classList.contains("is-side-collapsed") ?? false;
+      const os = document.documentElement.dataset.os;
+      const toggle = os === "windows" || os === "macos";
+      applySidebarCollapsed(toggle ? !collapsed : false);
     }
   });
 }
@@ -39,13 +44,18 @@ export function syncSidebarCollapseLabels(): void {
   const expands = document.querySelectorAll<HTMLButtonElement>(".chat-side-expand");
   const hide = t("chat.sideCollapse");
   const show = t("chat.sideExpand");
+  const listHidden = document.querySelector("#chat-shell")?.classList.contains("is-side-collapsed") ?? false;
+  const os = document.documentElement.dataset.os;
+  const pinned = os === "windows" || os === "macos";
   if (collapse) {
     collapse.title = hide;
     collapse.setAttribute("aria-label", hide);
   }
+  const expandLabel = pinned && !listHidden ? hide : show;
   expands.forEach((expand) => {
-    expand.title = show;
-    expand.setAttribute("aria-label", show);
+    expand.title = expandLabel;
+    expand.setAttribute("aria-label", expandLabel);
+    expand.setAttribute("aria-pressed", pinned && !listHidden ? "true" : "false");
   });
 }
 

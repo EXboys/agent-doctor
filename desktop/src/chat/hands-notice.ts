@@ -58,7 +58,7 @@ export function showHandsNotice(
     button.textContent = t("chat.handsOpenSettings");
     button.addEventListener("click", () => {
       hideHandsNotice();
-      openChatSettings("conversation", block === "computer" ? "computer" : "browser");
+      openChatSettings("control", block === "computer" ? "computer" : "browser");
     });
   }
   el.replaceChildren(sentence, button);
