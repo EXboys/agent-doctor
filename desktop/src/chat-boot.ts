@@ -121,8 +121,15 @@ import {
   teamupsChannelPref,
   teamupsChannelReply,
   teamupsChannelSetEnabled,
+  teamupsChannelSetTranscriptEnabled,
   teamupsChannelSince,
 } from "./ipc";
+import {
+  deskChatKey,
+  setDeskTranscriptConnected,
+  setDeskTranscriptEnabled,
+  syncDeskTranscripts,
+} from "./chat/desk-transcripts";
 import { collectChannelReplyImages } from "./chat/channel-images";
 import {
   agentRows,
@@ -626,7 +633,26 @@ function bootChatTail(): void {
   let channelOn = false;
   let channelEnabled = true;
   let channelSignedIn = false;
+  let transcriptEnabled = false;
   const channelSwitch = () => document.querySelector<HTMLInputElement>("#chat-settings-channel-switch");
+  const transcriptSwitch = () =>
+    document.querySelector<HTMLInputElement>("#chat-settings-transcript-switch");
+  const paintTranscript = () => {
+    const input = transcriptSwitch();
+    if (input) {
+      input.checked = transcriptEnabled;
+      input.disabled = !channelEnabled || !channelSignedIn;
+      input.setAttribute("aria-checked", transcriptEnabled ? "true" : "false");
+      input.setAttribute("aria-label", t("chat.settingsTranscriptSwitch"));
+    }
+    const el = document.querySelector<HTMLElement>("#chat-settings-transcript");
+    if (!el) return;
+    if (!channelSignedIn) el.textContent = t("chat.settingsChannelSignedOut");
+    else if (!channelEnabled) el.textContent = t("chat.settingsChannelClosed");
+    else el.textContent = transcriptEnabled
+      ? t("chat.settingsTranscriptOn")
+      : t("chat.settingsTranscriptOff");
+  };
   const paintChannel = () => {
     const el = document.querySelector<HTMLElement>("#chat-settings-channel");
     const input = channelSwitch();
@@ -641,12 +667,15 @@ function bootChatTail(): void {
     if (!channelEnabled) el.textContent = t("chat.settingsChannelClosed");
     else if (!channelSignedIn) el.textContent = t("chat.settingsChannelSignedOut");
     else el.textContent = channelOn ? t("chat.settingsChannelOn") : t("chat.settingsChannelOff");
+    paintTranscript();
   };
   const loadChannelPref = () => {
     void teamupsChannelPref()
       .then((pref) => {
         channelEnabled = pref.enabled;
         channelSignedIn = pref.signed_in;
+        transcriptEnabled = pref.transcript_enabled === true;
+        setDeskTranscriptEnabled(transcriptEnabled);
         paintChannel();
       })
       .catch(() => paintChannel());
@@ -660,6 +689,20 @@ function bootChatTail(): void {
     void teamupsChannelSetEnabled(on).catch(() => {
       channelEnabled = !on;
       paintChannel();
+    });
+  });
+  transcriptSwitch()?.addEventListener("change", () => {
+    const input = transcriptSwitch();
+    if (!input) return;
+    const on = input.checked;
+    transcriptEnabled = on;
+    setDeskTranscriptEnabled(on);
+    paintTranscript();
+    if (on) publishPhoneChats();
+    void teamupsChannelSetTranscriptEnabled(on).catch(() => {
+      transcriptEnabled = !on;
+      setDeskTranscriptEnabled(transcriptEnabled);
+      paintTranscript();
     });
   });
   const phoneFolder = (session: (typeof chatState.store.sessions)[number]): string => {
@@ -683,7 +726,14 @@ function bootChatTail(): void {
     }[] = [];
     for (const session of sessions) {
       const key = session.channelKey?.trim() ?? "";
-      if (!key.startsWith("phone:")) continue;
+      // 手机发起的会话用它的 phone: key；纯本地的会话冠以 desk: 上报，
+      // 手机列表才看得到这台电脑上都聊了什么（内容是否上传由同步开关另管）。
+      const chat = key.startsWith("phone:")
+        ? key
+        : key
+          ? ""
+          : deskChatKey(session.id);
+      if (!chat) continue;
       const state = channelSessionWaiting(session.id)
         ? "waiting"
         : isChatRunning(session.id)
@@ -693,7 +743,7 @@ function bootChatTail(): void {
             : "done";
       const folder = phoneFolder(session);
       chats.push({
-        chat: key,
+        chat,
         title: (session.title || "新会话").slice(0, 40),
         state,
         updatedAt: session.updatedAt || 0,
@@ -710,10 +760,12 @@ function bootChatTail(): void {
           }))
       : [];
     pushChannelSince();
+    syncDeskTranscripts(sessions);
     void teamupsChannelChats(chats.slice(0, 30), projects).catch(() => {});
   });
   void listen<boolean>("teamups-channel-status", (event) => {
     channelOn = event.payload === true;
+    setDeskTranscriptConnected(channelOn);
     paintChannel();
     if (channelOn) publishPhoneChats();
   });
@@ -723,6 +775,7 @@ function bootChatTail(): void {
   void teamupsChannelConnected()
     .then((on) => {
       channelOn = on;
+      setDeskTranscriptConnected(on);
       paintChannel();
       if (on) publishPhoneChats();
     })

@@ -12,10 +12,12 @@ use base64::Engine as _;
 use agent_doctor_core::{
     clean_reply_images, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
     parse_teamups_channel_job, parse_teamups_channel_sync, read_reply_image_in,
-    set_teamups_channel_enabled, set_teamups_channel_since, settings_db_path, teamups_channel_auth,
+    set_teamups_channel_enabled, set_teamups_channel_since, set_teamups_transcript_clear_pending,
+    set_teamups_transcript_sync_enabled, settings_db_path, teamups_channel_auth,
     teamups_channel_client_id, teamups_channel_computer_name, teamups_channel_enabled,
     teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
-    TeamupsChannelFile,
+    teamups_channel_transcript_clear_frame, teamups_channel_transcript_frame,
+    teamups_transcript_clear_pending, teamups_transcript_sync_enabled, TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -84,6 +86,8 @@ pub struct ChannelPref {
     client_id: String,
     /// 本机的电脑名称：即使未连上远端也能立即显示名字。
     computer_name: String,
+    /// 会话内容上传（手机看电脑会话）的开关，默认关。
+    transcript_enabled: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -199,6 +203,19 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
     let (mut write, mut read) = socket.split();
     if !send_within(&mut write, Message::Text(teamups_channel_hello().into())).await? {
         return Err("write stalled".to_string());
+    }
+    // 上次关同步开关时线没连上，清除云端副本的请求攒到现在补发。
+    if teamups_transcript_clear_pending().unwrap_or(false) {
+        if send_within(
+            &mut write,
+            Message::Text(teamups_channel_transcript_clear_frame().into()),
+        )
+        .await
+        .unwrap_or(false)
+        {
+            let _ = set_teamups_transcript_clear_pending(false);
+            note("transcript clear flushed after connect");
+        }
     }
     let (tx, mut rx) = mpsc::unbounded_channel();
     if let Some(outbound) = app.try_state::<Outbound>() {
@@ -421,6 +438,7 @@ pub async fn teamups_channel_pref_command() -> Result<ChannelPref, String> {
             signed_in: teamups_channel_signed_in().map_err(|err| err.to_string())?,
             client_id: teamups_channel_client_id().unwrap_or_default(),
             computer_name: teamups_channel_computer_name(),
+            transcript_enabled: teamups_transcript_sync_enabled().map_err(|err| err.to_string())?,
         })
     })
     .await
@@ -439,6 +457,66 @@ pub async fn teamups_channel_set_enabled_command(
     .map_err(|err| err.to_string())??;
     poke(&app);
     Ok(())
+}
+
+/// The transcript sync switch. Turning it off also asks the site to wipe this
+/// account's archived desktop chats: right away when the line is up, otherwise
+/// on the next connect (the pending flag in settings survives restarts).
+#[tauri::command]
+pub async fn teamups_channel_set_transcript_enabled_command(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let task_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        set_teamups_transcript_sync_enabled(enabled).map_err(|err| err.to_string())?;
+        if enabled {
+            set_teamups_transcript_clear_pending(false).map_err(|err| err.to_string())?;
+            return Ok(());
+        }
+        // 关掉就要清云端副本。此刻线不在线决定立即清还是攒到下次连接补清。
+        set_teamups_transcript_clear_pending(true).map_err(|err| err.to_string())?;
+        if send_transcript_frame(&task_app, teamups_channel_transcript_clear_frame()).is_ok() {
+            set_teamups_transcript_clear_pending(false).ok();
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|err| err.to_string())??;
+    poke(&app);
+    Ok(())
+}
+
+/// Push one incremental transcript chunk. Errors when the line is down so the
+/// caller keeps the chunk queued and retries after the next turn.
+#[tauri::command]
+pub fn teamups_channel_transcript_command(
+    app: AppHandle,
+    chat: String,
+    title: String,
+    updated_at: u64,
+    rows: serde_json::Value,
+) -> Result<(), String> {
+    if !teamups_transcript_sync_enabled().map_err(|err| err.to_string())? {
+        return Ok(());
+    }
+    if !rows.is_array() {
+        return Err("rows 必须是数组。".to_string());
+    }
+    let frame = teamups_channel_transcript_frame(&chat, &title, updated_at, &rows);
+    send_transcript_frame(&app, frame).map(|_| ())
+}
+
+/// Fire-and-forget send over the live line. `Err` means the line is down.
+fn send_transcript_frame(app: &AppHandle, frame: String) -> Result<(), String> {
+    let outbound = app
+        .try_state::<Outbound>()
+        .ok_or_else(|| "这条线还没启动。".to_string())?;
+    let guard = outbound.0.lock().expect("channel");
+    let tx = guard
+        .as_ref()
+        .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
+    tx.send(frame).map_err(|_| "没送出去。".to_string())
 }
 
 /// The chat window pushes its per-conversation archive cursors; the next

@@ -95,6 +95,69 @@ pub fn set_teamups_channel_enabled(on: bool) -> Result<()> {
     store.meta_set(CHANNEL_ENABLED_KEY, if on { "1" } else { "0" })
 }
 
+const TRANSCRIPT_ENABLED_KEY: &str = "teamups_transcript_sync_enabled";
+const TRANSCRIPT_CLEAR_PENDING_KEY: &str = "teamups_transcript_clear_pending";
+
+/// Whether this computer may upload its own (desktop-local) chat transcripts
+/// so the phone can read them. Default is off: uploading conversation content
+/// is the user's explicit choice, separate from keeping the line open.
+pub fn teamups_transcript_sync_enabled() -> Result<bool> {
+    let store = open_settings_store()?;
+    Ok(store.meta_get(TRANSCRIPT_ENABLED_KEY)?.as_deref() == Some("1"))
+}
+
+pub fn set_teamups_transcript_sync_enabled(on: bool) -> Result<()> {
+    let store = open_settings_store()?;
+    store.meta_set(TRANSCRIPT_ENABLED_KEY, if on { "1" } else { "0" })
+}
+
+/// Set when the sync switch was turned off while the line was down. The next
+/// connect flushes it, so "关闭后清除云端副本" survives being offline.
+pub fn teamups_transcript_clear_pending() -> Result<bool> {
+    let store = open_settings_store()?;
+    Ok(store.meta_get(TRANSCRIPT_CLEAR_PENDING_KEY)?.as_deref() == Some("1"))
+}
+
+pub fn set_teamups_transcript_clear_pending(pending: bool) -> Result<()> {
+    let store = open_settings_store()?;
+    store.meta_set(
+        TRANSCRIPT_CLEAR_PENDING_KEY,
+        if pending { "1" } else { "0" },
+    )
+}
+
+/// One incremental transcript frame: rows are keyed and the site upserts them,
+/// so resending a key overwrites instead of duplicating.
+pub fn teamups_channel_transcript_frame(
+    chat: &str,
+    title: &str,
+    updated_at: u64,
+    rows: &Value,
+) -> String {
+    let chat: String = chat
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(96)
+        .collect();
+    let title: String = title
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(80)
+        .collect();
+    json!({
+        "type": "transcript",
+        "chat": chat.trim(),
+        "title": title.trim(),
+        "updatedAt": updated_at,
+        "rows": rows,
+    })
+    .to_string()
+}
+
+pub fn teamups_channel_transcript_clear_frame() -> String {
+    json!({ "type": "transcript-clear" }).to_string()
+}
+
 /// `None` when nobody is signed in, or when the person turned the line off.
 /// Callers must not open a socket in that case.
 pub fn teamups_channel_auth() -> Result<Option<(String, String)>> {

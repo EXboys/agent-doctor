@@ -669,6 +669,8 @@ export function createSendController(deps: SendDeps) {
       await Promise.resolve();
       if (channel && draft.channelJobId) endChannelJob(chatSessionId, draft.channelJobId);
       deps.setBusy(false, chatSessionId);
+      // 本地会话的回合到这才算完：刷新手机快照并触发会话内容增量上传。
+      publishPhoneChats();
       if (here()) deps.expireLivePermissionCards();
       deps.settleRunRouting(chatSessionId);
       deps.renderSessionList();

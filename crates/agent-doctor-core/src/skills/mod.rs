@@ -38,11 +38,14 @@ pub use teamups_auth::{
 pub use teamups_channel::{
     clean_reply_images, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
     parse_teamups_channel_job, parse_teamups_channel_sync, read_reply_image, read_reply_image_in,
-    set_teamups_channel_enabled, set_teamups_channel_since, teamups_channel_auth,
-    teamups_channel_client_id, teamups_channel_computer_name, teamups_channel_enabled,
-    teamups_channel_heard, teamups_channel_hello, teamups_channel_presence, teamups_channel_reply,
-    teamups_channel_signed_in, teamups_channel_since, teamups_channel_ws_url, TeamupsChannelFile,
-    TeamupsChannelJob, REPLY_IMAGE_DATA_MAX, REPLY_IMAGE_MAX,
+    set_teamups_channel_enabled, set_teamups_channel_since, set_teamups_transcript_clear_pending,
+    set_teamups_transcript_sync_enabled, teamups_channel_auth, teamups_channel_client_id,
+    teamups_channel_computer_name, teamups_channel_enabled, teamups_channel_heard,
+    teamups_channel_hello, teamups_channel_presence, teamups_channel_reply,
+    teamups_channel_signed_in, teamups_channel_since, teamups_channel_transcript_clear_frame,
+    teamups_channel_transcript_frame, teamups_channel_ws_url, teamups_transcript_clear_pending,
+    teamups_transcript_sync_enabled, TeamupsChannelFile, TeamupsChannelJob, REPLY_IMAGE_DATA_MAX,
+    REPLY_IMAGE_MAX,
 };
 pub use teamups_schedules::{
     teamups_computers, teamups_create_schedule, teamups_delete_schedule, teamups_run_schedule,

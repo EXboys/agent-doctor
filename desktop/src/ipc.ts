@@ -292,8 +292,25 @@ export function teamupsChannelPref(): Promise<{
   signed_in: boolean;
   client_id: string;
   computer_name?: string;
+  transcript_enabled?: boolean;
 }> {
   return invoke("teamups_channel_pref_command");
+}
+
+/** 会话内容上传开关。关掉时电脑会顺带请求清空这个账号的 desk: 云端副本
+ *  （线不在线都成立：离线时攒着，下次连接补发）。 */
+export function teamupsChannelSetTranscriptEnabled(enabled: boolean): Promise<void> {
+  return invoke("teamups_channel_set_transcript_enabled_command", { enabled });
+}
+
+/** 增量上传一条本地会话的行。线没连上时抛错，调用方留着下次再发。 */
+export function teamupsChannelTranscript(
+  chat: string,
+  title: string,
+  updatedAt: number,
+  rows: unknown[],
+): Promise<void> {
+  return invoke("teamups_channel_transcript_command", { chat, title, updatedAt, rows });
 }
 
 /// 站点上那批排期：手机和本机管的是同一份数据。

@@ -1276,6 +1276,8 @@ pub fn run() {
             channel_link::teamups_channel_connected_command,
             channel_link::teamups_channel_pref_command,
             channel_link::teamups_channel_set_enabled_command,
+            channel_link::teamups_channel_set_transcript_enabled_command,
+            channel_link::teamups_channel_transcript_command,
             channel_link::teamups_channel_since_command,
             channel_link::teamups_channel_ask_command,
             channel_link::teamups_channel_reply_command,
