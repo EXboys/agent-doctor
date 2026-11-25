@@ -205,17 +205,16 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
         return Err("write stalled".to_string());
     }
     // 上次关同步开关时线没连上，清除云端副本的请求攒到现在补发。
-    if teamups_transcript_clear_pending().unwrap_or(false) {
-        if send_within(
+    if teamups_transcript_clear_pending().unwrap_or(false)
+        && send_within(
             &mut write,
             Message::Text(teamups_channel_transcript_clear_frame().into()),
         )
         .await
         .unwrap_or(false)
-        {
-            let _ = set_teamups_transcript_clear_pending(false);
-            note("transcript clear flushed after connect");
-        }
+    {
+        let _ = set_teamups_transcript_clear_pending(false);
+        note("transcript clear flushed after connect");
     }
     let (tx, mut rx) = mpsc::unbounded_channel();
     if let Some(outbound) = app.try_state::<Outbound>() {
