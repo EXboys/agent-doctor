@@ -138,8 +138,8 @@ html[data-os="windows"] .chat-files-toggle {
   border-radius: 6px;
 }
 
-/* macOS traffic lights sit on the title strip. The shortcut list starts under
-   that strip, so the lights never cover 添加项目. */
+/* macOS traffic lights sit at y=14. The sidebar drag strip is only tall
+   enough to clear them; the shortcut list starts just underneath. */
 html[data-os="macos"] {
   --chat-topbar-h: 40px;
 }

@@ -321,6 +321,18 @@ body.chat-is-resizing * {
   padding: 0 16px;
 }
 
+/* Windowed macOS: lights sit at y=14 and end near y=26. Keep a short drag
+   strip under them, and cancel the column gap so 添加项目 is not a full
+   row below the lights. */
+html[data-os="macos"]:not(.is-window-fullscreen) .chat-side-tools {
+  height: 32px;
+  margin-bottom: -12px;
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .chat-side-nav {
+  margin-top: 0;
+}
+
 /* Full screen hides the traffic lights. Drop the empty title row so the
    shortcut list sits near the top. */
 html.is-window-fullscreen .chat-side-tools {
