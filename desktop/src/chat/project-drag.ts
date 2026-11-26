@@ -28,6 +28,7 @@ export function attachProjectReorderPointer(
   head: HTMLElement,
   projectName: string,
   onReorder: (from: string, to: string, position: ProjectDropPosition) => void,
+  onClick?: () => void,
 ): void {
   head.classList.add("chat-session-group-drag-handle");
   head.setAttribute("draggable", "false");
@@ -161,6 +162,7 @@ export function attachProjectReorderPointer(
     detach();
     if (!dragging || !dragged) {
       dragging = false;
+      onClick?.();
       return;
     }
     dragging = false;

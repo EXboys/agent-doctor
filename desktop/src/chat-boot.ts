@@ -400,10 +400,6 @@ function bootChatTail(): void {
   attachEl.addEventListener("click", () => void pickAttachments());
   screenshotEl.addEventListener("click", () => void captureScreen());
   newWorkspaceEl.addEventListener("click", () => addProjectFromAsk());
-  const projectKbd = document.querySelector("#chat-new-workspace-kbd");
-  if (projectKbd) {
-    projectKbd.textContent = document.documentElement.dataset.os === "macos" ? "⌘O" : "Ctrl O";
-  }
   window.addEventListener("keydown", (event) => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
     if (event.key.toLowerCase() !== "o" || event.repeat) return;

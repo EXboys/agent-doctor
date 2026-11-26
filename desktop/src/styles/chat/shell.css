@@ -162,7 +162,7 @@ body.chat-is-resizing * {
 .chat-side-nav {
   display: grid;
   gap: 2px;
-  margin: 4px -8px 12px;
+  margin: 4px -8px 4px;
 }
 
 .chat-side-nav > [hidden],

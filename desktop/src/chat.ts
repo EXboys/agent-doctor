@@ -674,7 +674,10 @@ export function applyI18n(): void {
     pickSkillEl.title = pickLabel;
     pickSkillEl.setAttribute("aria-label", pickLabel);
   }
-  newWorkspaceEl.title = t("chat.addProjectPick");
+  const addProjectLabel = t("chat.newWorkspace");
+  const addProjectShortcut = document.documentElement.dataset.os === "macos" ? "⌘O" : "Ctrl O";
+  newWorkspaceEl.title = `${addProjectLabel}  ${addProjectShortcut}`;
+  newWorkspaceEl.setAttribute("aria-label", addProjectLabel);
   chatState.voiceInput?.applyI18n();
   chatState.hosted?.applyI18n();
   if (resourcesSearchEl) {

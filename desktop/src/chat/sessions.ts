@@ -278,13 +278,11 @@ export function createSessionsController(deps: SessionsDeps) {
     const wrap = document.createElement("span");
     wrap.className = "chat-session-group-icon";
     wrap.setAttribute("aria-hidden", "true");
-    const folder = document.createElement("span");
-    folder.className = "chat-session-group-icon-folder";
-    folder.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h6l2 2h8v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-    const chevron = document.createElement("span");
-    chevron.className = `chat-session-group-icon-chevron${collapsed ? " is-collapsed" : ""}`;
-    chevron.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 10l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    wrap.append(folder, chevron);
+    const closed =
+      "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
+    const opened =
+      "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2";
+    wrap.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="${collapsed ? closed : opened}" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     return wrap;
   }
 
@@ -535,6 +533,43 @@ export function createSessionsController(deps: SessionsDeps) {
     return card;
   }
 
+  let projectRowFoldKey = "";
+  let projectRowFoldAt = 0;
+
+  function toggleProjectCollapsed(key: string): void {
+    const collapsed = !collapsedProjects.has(key);
+    if (collapsed) collapsedProjects.add(key);
+    else collapsedProjects.delete(key);
+    const block = deps.sessionListEl.querySelector<HTMLElement>(
+      `.chat-session-group[data-group-key="${CSS.escape(key)}"]`,
+    );
+    if (!block) {
+      renderSessionList();
+      return;
+    }
+    block.classList.toggle("is-collapsed", collapsed);
+    const fold = block.querySelector<HTMLButtonElement>(".chat-session-group-fold");
+    if (!fold) return;
+    fold.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    fold.title = collapsed ? t("chat.sessionGroupExpand") : t("chat.sessionGroupFold");
+    fold.replaceChildren(groupFoldIcon(collapsed));
+  }
+
+  /** One click on the project row folds it. A second click right away renames it. */
+  function onProjectRowActivate(key: string, rename: (() => void) | null): void {
+    const now = Date.now();
+    if (rename && projectRowFoldKey === key && now - projectRowFoldAt < 400) {
+      projectRowFoldAt = 0;
+      projectRowFoldKey = "";
+      toggleProjectCollapsed(key);
+      rename();
+      return;
+    }
+    projectRowFoldAt = now;
+    projectRowFoldKey = key;
+    toggleProjectCollapsed(key);
+  }
+
   function renderSessionList(): void {
     deps.sessionListEl.replaceChildren();
     deps.renderImportEntry?.(deps.sessionListEl);
@@ -583,9 +618,9 @@ export function createSessionsController(deps: SessionsDeps) {
       fold.addEventListener("click", (event) => {
         event.stopPropagation();
         if (consumeProjectDragClick()) return;
-        if (projectCollapsed) collapsedProjects.delete(key);
-        else collapsedProjects.add(key);
-        renderSessionList();
+        projectRowFoldAt = 0;
+        projectRowFoldKey = "";
+        toggleProjectCollapsed(key);
       });
 
       const label = document.createElement("span");
@@ -597,6 +632,8 @@ export function createSessionsController(deps: SessionsDeps) {
         label.addEventListener("dblclick", (event) => {
           event.preventDefault();
           event.stopPropagation();
+          projectRowFoldAt = 0;
+          projectRowFoldKey = "";
           beginProjectRename(label, projectName);
         });
       }
@@ -620,25 +657,37 @@ export function createSessionsController(deps: SessionsDeps) {
           event.stopPropagation();
           openProjectMenu(event.clientX, event.clientY, projectName, group.sessions);
         });
-        attachProjectReorderPointer(deps.sessionListEl, head, projectName, commitProjectReorder);
+        attachProjectReorderPointer(
+          deps.sessionListEl,
+          head,
+          projectName,
+          commitProjectReorder,
+          () => onProjectRowActivate(key, () => beginProjectRename(label, projectName)),
+        );
 
         const add = document.createElement("button");
         add.type = "button";
         add.className = "chat-session-group-new";
         add.title = t("chat.newSessionInProject");
         add.setAttribute("aria-label", t("chat.newSessionInProject"));
-        add.textContent = "+";
+        add.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
         add.setAttribute("aria-haspopup", "menu");
         add.addEventListener("click", (event) => {
           event.stopPropagation();
           void beginNewSessionInProject(projectName, add);
         });
         head.append(add);
+      } else {
+        head.addEventListener("click", (event) => {
+          const target = event.target;
+          if (target instanceof Element && target.closest("button")) return;
+          onProjectRowActivate(key, null);
+        });
       }
 
       block.append(head);
 
-      if (!projectCollapsed) {
+      {
         const shown = expandedSessionLists.get(key) ?? SESSIONS_PREVIEW_COUNT;
         const { visible, hiddenCount } = visibleSessionsForGroup(group.sessions, shown);
         const list = document.createElement("div");

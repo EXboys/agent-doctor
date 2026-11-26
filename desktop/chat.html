@@ -92,15 +92,6 @@
           </button>
         </div>
         <nav class="chat-side-nav" aria-label="快捷入口">
-          <button id="chat-new-workspace" type="button" class="chat-side-nav-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 10v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M9 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span data-i18n="chat.newWorkspace">添加项目</span>
-            <span id="chat-new-workspace-kbd" class="chat-side-nav-kbd">⌘O</span>
-          </button>
           <button id="chat-search-open" type="button" class="chat-side-nav-item" aria-haspopup="dialog" aria-expanded="false" aria-controls="chat-search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <circle cx="11" cy="11" r="7.5" stroke="currentColor" stroke-width="2"/>
@@ -156,6 +147,13 @@
         <div class="chat-session-block">
           <div class="chat-sessions-head">
             <p class="chat-session-label" data-i18n="chat.projects">项目</p>
+            <button id="chat-new-workspace" type="button" class="chat-sessions-add" aria-label="添加项目" title="添加项目">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 10v6" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 13h6" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
           </div>
           <div id="chat-sessions" class="chat-sessions" role="list"></div>
         </div>

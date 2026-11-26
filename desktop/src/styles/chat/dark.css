@@ -401,13 +401,16 @@ html[data-theme="dark"] .chat-session {
   color: #c8c8c8;
 }
 
-html[data-theme="dark"] .chat-session.is-active {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e6e6e6;
+html[data-theme="dark"] .chat-session.is-active,
+html[data-theme="dark"] .chat-session-group-list .chat-session.is-compact.is-active {
+  background: rgba(255, 255, 255, 0.09);
+  color: #efefef;
 }
 
 /* Neutral hover on the dark rail; the light-mode bluish wash reads dirty here. */
-html[data-theme="dark"] .chat-session:hover {
+html[data-theme="dark"] .chat-session:hover,
+html[data-theme="dark"] .chat-session-group-list .chat-session.is-compact:hover,
+html[data-theme="dark"] .chat-session-group-head:hover {
   background: rgba(255, 255, 255, 0.05);
 }
 

@@ -27,6 +27,50 @@ function remoteKey(hostId: string, name: string): string {
   return `${hostId}::${name}`;
 }
 
+function hostPickIcon(kind: "local" | "remote"): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const add = (tag: "path" | "rect", attrs: Record<string, string>) => {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    node.setAttribute("stroke", "currentColor");
+    node.setAttribute("stroke-width", "2");
+    node.setAttribute("stroke-linecap", "round");
+    node.setAttribute("stroke-linejoin", "round");
+    svg.append(node);
+  };
+  if (kind === "local") {
+    add("rect", { x: "2", y: "3", width: "20", height: "14", rx: "2" });
+    add("path", { d: "M8 21h8M12 17v4" });
+  } else {
+    add("rect", { x: "2", y: "2", width: "20", height: "8", rx: "2" });
+    add("rect", { x: "2", y: "14", width: "20", height: "8", rx: "2" });
+    add("path", { d: "M6 6h.01M6 18h.01" });
+  }
+  return svg;
+}
+
+function hostPickChevron(): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "m9 18 6-6-6-6");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
+}
+
 async function pickComputer(
   hosts: RemoteHostRow[],
   statuses: LinkHostStatus[],
@@ -37,35 +81,60 @@ async function pickComputer(
     const overlay = document.createElement("div");
     overlay.className = "chat-host-pick";
     overlay.innerHTML = `
-      <div class="chat-host-pick-card" role="dialog" aria-modal="true">
-        <p class="chat-host-pick-title"></p>
+      <div class="chat-host-pick-card" role="dialog" aria-modal="true" aria-labelledby="chat-host-pick-title">
+        <p id="chat-host-pick-title" class="chat-host-pick-title"></p>
+        <p class="chat-host-pick-hint"></p>
         <div class="chat-host-pick-list"></div>
-        <button type="button" class="btn-ghost chat-host-pick-cancel"></button>
+        <button type="button" class="chat-host-pick-cancel"></button>
       </div>
     `;
     const title = overlay.querySelector(".chat-host-pick-title")!;
     title.textContent = t("remote.pickComputer");
+    overlay.querySelector(".chat-host-pick-hint")!.textContent = t("remote.pickComputerHint");
     const list = overlay.querySelector(".chat-host-pick-list")!;
     const cancel = overlay.querySelector<HTMLButtonElement>(".chat-host-pick-cancel")!;
     cancel.textContent = t("resources.cancel");
 
     const finish = (value: "local" | string | null) => {
+      document.removeEventListener("keydown", onKey, true);
       overlay.remove();
       resolve(value);
     };
 
-    const addBtn = (label: string, value: "local" | string, hint = "") => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      finish(null);
+    };
+
+    const addBtn = (label: string, value: "local" | string, hint = "", kind: "local" | "remote" = "remote") => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "chat-host-pick-item";
-      button.innerHTML = `<strong></strong><span></span>`;
-      button.querySelector("strong")!.textContent = label;
-      button.querySelector("span")!.textContent = hint;
+      const icon = document.createElement("span");
+      icon.className = "chat-host-pick-icon";
+      icon.append(hostPickIcon(kind));
+      const copy = document.createElement("span");
+      copy.className = "chat-host-pick-copy";
+      const name = document.createElement("strong");
+      name.textContent = label;
+      copy.append(name);
+      if (hint) {
+        const meta = document.createElement("span");
+        meta.className = "chat-host-pick-meta";
+        meta.textContent = hint;
+        copy.append(meta);
+      }
+      const chevron = document.createElement("span");
+      chevron.className = "chat-host-pick-chevron";
+      chevron.append(hostPickChevron());
+      button.append(icon, copy, chevron);
       button.addEventListener("click", () => finish(value));
       list.append(button);
     };
 
-    addBtn(t("remote.thisComputer"), "local");
+    addBtn(t("remote.thisComputer"), "local", t("remote.thisComputerHint"), "local");
     for (const host of hosts) {
       const status = statuses.find((s) => s.hostId === host.host_id);
       const name = host.display_name?.trim() || status?.displayName || host.host_id;
@@ -78,7 +147,9 @@ async function pickComputer(
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) finish(null);
     });
+    document.addEventListener("keydown", onKey, true);
     document.body.append(overlay);
+    list.querySelector<HTMLButtonElement>(".chat-host-pick-item")?.focus();
   });
 }
 
