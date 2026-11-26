@@ -91,7 +91,68 @@
             </svg>
           </button>
         </div>
-        <button id="chat-new-workspace" type="button" class="btn-side btn-new" data-i18n="chat.newWorkspace">添加项目</button>
+        <nav class="chat-side-nav" aria-label="快捷入口">
+          <button id="chat-new-workspace" type="button" class="chat-side-nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 10v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M9 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span data-i18n="chat.newWorkspace">添加项目</span>
+            <span id="chat-new-workspace-kbd" class="chat-side-nav-kbd">⌘O</span>
+          </button>
+          <button id="chat-search-open" type="button" class="chat-side-nav-item" aria-haspopup="dialog" aria-expanded="false" aria-controls="chat-search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7.5" stroke="currentColor" stroke-width="2"/>
+              <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span data-i18n="chat.search">搜索</span>
+            <span id="chat-search-kbd" class="chat-side-nav-kbd">⌘K</span>
+          </button>
+          <button
+            id="chat-knowledge-open"
+            type="button"
+            class="chat-side-nav-item chat-knowledge-open"
+            aria-pressed="false"
+            aria-controls="chat-knowledge"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 5v16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span data-i18n="chat.knowledge">知识库</span>
+          </button>
+          <button
+            id="chat-schedule-open"
+            type="button"
+            class="chat-side-nav-item chat-schedule-open"
+            aria-pressed="false"
+            aria-controls="chat-schedule"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M16 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M17 15.5v1.7l1 .625" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M21 8.936V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h3.935" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3 9h9.873" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="17" cy="17" r="5" stroke="currentColor" stroke-width="2"/>
+            </svg>
+            <span data-i18n="chat.schedule">计划任务</span>
+          </button>
+          <button
+            id="chat-resources-toggle"
+            type="button"
+            class="chat-side-nav-item chat-resources-toggle"
+            aria-expanded="false"
+            aria-controls="chat-resources-panel"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <rect x="14" y="2" width="8" height="8" rx="1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
+          </button>
+        </nav>
         <div class="chat-session-block">
           <div class="chat-sessions-head">
             <p class="chat-session-label" data-i18n="chat.projects">项目</p>
@@ -100,44 +161,6 @@
         </div>
 
         <div class="chat-side-foot">
-          <button
-            id="chat-knowledge-open"
-            type="button"
-            class="chat-knowledge-open"
-            aria-pressed="false"
-            aria-controls="chat-knowledge"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5V5.5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-              <path d="M4 19.2A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-            </svg>
-            <span data-i18n="chat.knowledge">知识库</span>
-          </button>
-          <button
-            id="chat-schedule-open"
-            type="button"
-            class="chat-schedule-open"
-            aria-pressed="false"
-            aria-controls="chat-schedule"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/>
-              <path d="M12 8v4.5l3 1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span data-i18n="chat.schedule">计划任务</span>
-          </button>
-          <button
-            id="chat-resources-toggle"
-            type="button"
-            class="chat-resources-toggle"
-            aria-expanded="false"
-            aria-controls="chat-resources-panel"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
-          </button>
           <div class="chat-account-bar">
             <div class="chat-account-wrap">
               <button id="chat-account" type="button" class="chat-account" title="登录">
@@ -1246,6 +1269,24 @@
       >
         精简对话
       </button>
+    </div>
+    <div id="chat-search" class="chat-search" hidden>
+      <div class="chat-search-card" role="dialog" aria-modal="true" aria-labelledby="chat-search-label">
+        <label class="chat-search-field">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7.5" stroke="currentColor" stroke-width="2"/>
+            <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <input id="chat-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="搜索项目或对话" aria-labelledby="chat-search-label">
+        </label>
+        <span id="chat-search-label" class="chat-search-sr" data-i18n="chat.search">搜索</span>
+        <div class="chat-search-scopes" role="tablist">
+          <button type="button" class="chat-search-scope is-on" data-search-scope="all" role="tab" aria-selected="true" data-i18n="chat.searchAll">全部</button>
+          <button type="button" class="chat-search-scope" data-search-scope="projects" role="tab" aria-selected="false" data-i18n="chat.searchProjects">项目</button>
+          <button type="button" class="chat-search-scope" data-search-scope="chats" role="tab" aria-selected="false" data-i18n="chat.searchChats">对话</button>
+        </div>
+        <div id="chat-search-results" class="chat-search-results"></div>
+      </div>
     </div>
     <!-- The watchdog loads first so its error hook is live before chat.ts evaluates. -->
     <script type="module" src="/src/chat/boot-watchdog.ts"></script>

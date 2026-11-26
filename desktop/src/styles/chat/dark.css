@@ -264,13 +264,18 @@ html[data-theme="dark"] .chat-resources-toggle-title {
   color: #d4d4d4;
 }
 
+html[data-theme="dark"] .chat-side-nav-item:hover:not(:disabled),
 html[data-theme="dark"] .chat-resources-toggle:hover,
-html[data-theme="dark"] .chat-resources-toggle.is-open,
 html[data-theme="dark"] .chat-knowledge-open:hover,
+html[data-theme="dark"] .chat-schedule-open:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+html[data-theme="dark"] .chat-resources-toggle.is-open,
+html[data-theme="dark"] .chat-resources-toggle.is-on,
 html[data-theme="dark"] .chat-knowledge-open.is-on,
-html[data-theme="dark"] .chat-schedule-open:hover,
 html[data-theme="dark"] .chat-schedule-open.is-on {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 html[data-theme="dark"] .chat-resources-count,

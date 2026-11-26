@@ -81,6 +81,7 @@ import {
 import { createFilesPanel } from "./chat/files-panel";
 import { setFileLinkRoot } from "./chat/file-links";
 import { bootChat } from "./chat-boot";
+import { bindSidebarSearch } from "./chat/sidebar-search";
 import {
   AskMentionMenuController,
   AskResourcesController,
@@ -1353,6 +1354,7 @@ initChatStore();
 
 try {
   bootChat();
+  bindSidebarSearch();
 } catch (error) {
   showBootFailure(error);
 }

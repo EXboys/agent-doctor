@@ -159,10 +159,18 @@ body.chat-is-resizing * {
   color: var(--muted);
 }
 
-.chat-resources-toggle[hidden] {
-  display: none;
+.chat-side-nav {
+  display: grid;
+  gap: 2px;
+  margin: 4px -8px 12px;
 }
 
+.chat-side-nav > [hidden],
+.chat-resources-toggle[hidden] {
+  display: none !important;
+}
+
+.chat-side-nav-item,
 .chat-resources-toggle,
 .chat-knowledge-open,
 .chat-schedule-open {
@@ -172,33 +180,49 @@ body.chat-is-resizing * {
   justify-content: flex-start;
   gap: 8px;
   width: 100%;
+  height: 32px;
   margin: 0;
-  padding: 6px 8px;
+  padding: 0 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  font-size: 0.84rem;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
   text-align: left;
 }
 
+.chat-side-nav-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chat-side-nav-item svg,
 .chat-resources-toggle svg,
 .chat-knowledge-open svg,
 .chat-schedule-open svg {
   flex: none;
-  color: var(--muted);
+  width: 16px;
+  height: 16px;
+  color: currentColor;
 }
 
+.chat-side-nav-item:hover:not(:disabled),
 .chat-resources-toggle:hover,
-.chat-resources-toggle.is-open,
 .chat-knowledge-open:hover,
+.chat-schedule-open:hover {
+  background: rgba(10, 10, 10, 0.05);
+}
+
+.chat-resources-toggle.is-open,
+.chat-resources-toggle.is-on,
 .chat-knowledge-open.is-on,
-.chat-schedule-open:hover,
 .chat-schedule-open.is-on {
-  background: rgba(10, 10, 10, 0.06);
+  background: rgba(10, 10, 10, 0.08);
 }
 
 .chat-resources-toggle-title {
@@ -295,7 +319,21 @@ body.chat-is-resizing * {
   height: var(--chat-topbar-h);
   margin: 0 -16px;
   padding: 0 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+/* Full screen hides the traffic lights. Drop the empty title row so the
+   shortcut list sits near the top. */
+html.is-window-fullscreen .chat-side-tools {
+  display: none;
+}
+
+html.is-window-fullscreen .chat-side {
+  padding-top: 10px;
+}
+
+html.is-window-fullscreen .chat-side-nav,
+html[data-os="windows"] .chat-side-nav {
+  margin-top: 0;
 }
 
 .chat-side-icon {

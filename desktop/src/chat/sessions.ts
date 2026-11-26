@@ -17,6 +17,7 @@ import {
   saveProjectOrder,
 } from "./project-order";
 import {
+  SESSIONS_MORE_STEP,
   SESSIONS_PREVIEW_COUNT,
   shouldUseProjectSidebar,
   sidebarGroupKey,
@@ -109,8 +110,8 @@ export type SessionsApi = ReturnType<typeof createSessionsController>;
 export function createSessionsController(deps: SessionsDeps) {
   /** Whole project folder collapsed (Cursor-style). */
   const collapsedProjects = new Set<string>();
-  /** Per-project list expanded past SESSIONS_PREVIEW_COUNT. */
-  const expandedSessionLists = new Set<string>();
+  /** How many chats each project currently shows. Missing means the preview. */
+  const expandedSessionLists = new Map<string, number>();
   /** Chats opened from the island, so they sit at the top until a newer update. */
   const surfacedAt = new Map<string, number>();
   /** Sidebar row currently showing its rename input. */
@@ -638,11 +639,8 @@ export function createSessionsController(deps: SessionsDeps) {
       block.append(head);
 
       if (!projectCollapsed) {
-        const { visible, hiddenCount } = visibleSessionsForGroup(
-          group.sessions,
-          key,
-          expandedSessionLists,
-        );
+        const shown = expandedSessionLists.get(key) ?? SESSIONS_PREVIEW_COUNT;
+        const { visible, hiddenCount } = visibleSessionsForGroup(group.sessions, shown);
         const list = document.createElement("div");
         list.className = "chat-session-group-list";
         list.setAttribute("role", "list");
@@ -655,13 +653,13 @@ export function createSessionsController(deps: SessionsDeps) {
           more.className = "chat-session-group-more";
           more.textContent = t("chat.sessionShowMore");
           more.addEventListener("click", () => {
-            expandedSessionLists.add(key);
+            expandedSessionLists.set(key, shown + SESSIONS_MORE_STEP);
             renderSessionList();
           });
           list.append(more);
         } else if (
           group.sessions.length > SESSIONS_PREVIEW_COUNT &&
-          expandedSessionLists.has(key)
+          shown > SESSIONS_PREVIEW_COUNT
         ) {
           const less = document.createElement("button");
           less.type = "button";

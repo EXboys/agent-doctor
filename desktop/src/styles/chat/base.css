@@ -101,18 +101,17 @@ html[data-os="windows"] {
 }
 
 html[data-os="windows"] .chat-side {
-  padding: 0 12px 12px;
+  padding: 6px 12px 12px;
   gap: 8px;
 }
 
+/* Caption buttons sit on the right. The shortcut list starts on that same
+   top band, the way Paseo does, instead of under a blank title strip. */
 html[data-os="windows"] .chat-side-tools {
-  margin: 0 -12px;
-  padding: 0 8px;
-  border-bottom-color: color-mix(in srgb, var(--line) 35%, transparent);
+  display: none;
 }
 
-/* The panel icon sits on the conversation side of the divider. The sidebar
-   row only keeps the new-project action. */
+/* The panel icon sits on the conversation side of the divider. */
 html[data-os="windows"] #chat-side-collapse,
 html[data-os="macos"] #chat-side-collapse {
   display: none;
@@ -123,47 +122,6 @@ html[data-os="windows"] .chat-knowledge-head .chat-side-expand,
 html[data-os="macos"] .chat-top .chat-side-expand,
 html[data-os="macos"] .chat-knowledge-head .chat-side-expand {
   display: inline-flex;
-}
-
-html[data-os="windows"] #chat-new-workspace {
-  position: absolute;
-  top: 6px;
-  left: 8px;
-  z-index: 2;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  margin: 0;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-
-html[data-os="windows"] #chat-new-workspace:not([hidden]) {
-  display: inline-flex;
-}
-
-html[data-os="windows"] #chat-new-workspace[hidden] {
-  display: none !important;
-}
-
-html[data-os="windows"] #chat-new-workspace::before {
-  content: "+";
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-html[data-os="windows"] #chat-new-workspace:hover:not(:disabled) {
-  background: var(--fill);
-  border-color: transparent;
-  color: var(--text);
 }
 
 html[data-os="windows"] .chat-top {
@@ -180,66 +138,14 @@ html[data-os="windows"] .chat-files-toggle {
   border-radius: 6px;
 }
 
-/* macOS traffic lights sit on the overlay title bar at x=16. The same 84px
-   clearance already used by the collapsed conversation bar keeps "+ 添加项目"
-   to their right. Full screen hides the lights. When the resources panel is
-   the leftmost column, the lights sit on that panel instead. */
+/* macOS traffic lights sit on the title strip. The shortcut list starts under
+   that strip, so the lights never cover 添加项目. */
 html[data-os="macos"] {
   --chat-topbar-h: 40px;
-  --chat-title-safe: 16px;
-}
-
-html[data-os="macos"]:not(.is-window-fullscreen) .chat-shell:not(.is-resources-open) {
-  --chat-title-safe: 84px;
 }
 
 html[data-os="macos"] .chat-top {
   padding-left: 8px;
-}
-
-html[data-os="macos"] #chat-new-workspace {
-  position: absolute;
-  top: 6px;
-  left: calc(var(--chat-title-safe) - 8px);
-  z-index: 2;
-  max-width: calc(100% - var(--chat-title-safe) - 8px);
-  height: 28px;
-  margin: 0;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: 28px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-html[data-os="macos"] #chat-new-workspace:not([hidden]) {
-  display: inline-block;
-}
-
-html[data-os="macos"] #chat-new-workspace[hidden] {
-  display: none !important;
-}
-
-html[data-os="macos"] #chat-new-workspace::before {
-  content: "+";
-  margin-right: 6px;
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-html[data-os="macos"] #chat-new-workspace:hover:not(:disabled) {
-  background: var(--fill);
-  border-color: transparent;
-  color: var(--text);
 }
 
 html[data-os="windows"] .chat-session-label {

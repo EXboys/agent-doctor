@@ -4,6 +4,9 @@ import type { ChatSession } from "./types";
 /** Default visible chats per project before "More". */
 export const SESSIONS_PREVIEW_COUNT = 3;
 
+/** How many more chats one「更多」click reveals. */
+export const SESSIONS_MORE_STEP = 5;
+
 const SIDE_KEY = "agent-doctor-ask-side-collapsed";
 
 function applySidebarCollapsed(collapsed: boolean): void {
@@ -73,15 +76,15 @@ export function sidebarSessionRank(updatedAt: number, surfacedAt = 0): number {
 
 export function visibleSessionsForGroup(
   sessions: ChatSession[],
-  groupKey: string,
-  expandedLists: Set<string>,
+  shown: number,
 ): { visible: ChatSession[]; hiddenCount: number } {
-  if (sessions.length <= SESSIONS_PREVIEW_COUNT || expandedLists.has(groupKey)) {
+  const limit = Math.max(SESSIONS_PREVIEW_COUNT, shown);
+  if (sessions.length <= limit) {
     return { visible: sessions, hiddenCount: 0 };
   }
   return {
-    visible: sessions.slice(0, SESSIONS_PREVIEW_COUNT),
-    hiddenCount: sessions.length - SESSIONS_PREVIEW_COUNT,
+    visible: sessions.slice(0, limit),
+    hiddenCount: sessions.length - limit,
   };
 }
 
