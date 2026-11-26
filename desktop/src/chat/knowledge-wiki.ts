@@ -21,6 +21,15 @@ import {
 } from "../ipc";
 import { renderMarkdown } from "../markdown";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
+import {
+  htmlToMarkdown,
+  joinWikiPage,
+  nextNotePath,
+  plainLead,
+  splitWikiPage,
+  upsertIndexLink,
+  WIKI_PAGE_MAX_BYTES,
+} from "./wiki-edit";
 import type { PromptSessionEvent } from "./types";
 import { syncKnowledgeFolder } from "./knowledge-sync";
 import { wikiRunProgress } from "./wiki-progress";
@@ -56,6 +65,29 @@ type Starter = {
 
 type Notice = { tone: "ok" | "warn" | "muted"; text: string };
 
+type EditState = {
+  path: string;
+  isNew: boolean;
+  title: string;
+  body: string;
+  baselineTitle: string;
+  baselineBody: string;
+  saving: boolean;
+  cancelArmed: boolean;
+  returnPath: string | null;
+};
+
+type EditorNodes = {
+  scopeKey: string;
+  path: string;
+  title: HTMLInputElement;
+  body: HTMLElement;
+  didFocus: boolean;
+};
+
+let editorNodes: EditorNodes | null = null;
+let composing = false;
+
 type WikiState = {
   loaded: boolean;
   loading: boolean;
@@ -63,7 +95,9 @@ type WikiState = {
   pages: KnowledgePage[];
   selected: string | null;
   query: string;
-  page: { path: string; html: string } | null;
+  page: { path: string; html: string; source: string } | null;
+  /** Set while the open page is being written. */
+  edit: EditState | null;
   pageError: string | null;
   run: {
     id: string;
@@ -98,6 +132,7 @@ function stateFor(key: string): WikiState {
       selected: null,
       query: "",
       page: null,
+      edit: null,
       pageError: null,
       run: null,
       notice: null,
@@ -204,6 +239,7 @@ async function reloadPages(scope: WikiScope): Promise<void> {
   state.pages = pages;
   state.loaded = true;
   state.error = null;
+  if (state.edit?.isNew) return;
   if (!state.selected || !pages.some((page) => page.path === state.selected)) {
     state.selected = pages[0]?.path ?? null;
     state.page = null;
@@ -268,6 +304,7 @@ async function generateFromStarters(scope: WikiScope, deps: WikiDeps): Promise<v
   const state = stateFor(scope.key);
   const picked = (state.starters ?? []).filter((item) => item.checked);
   if (!picked.length || state.run) return;
+  if (!leaveEdit(scope)) return;
   const paths = picked.flatMap((item) => (item.path ? [item.path] : []));
   const chats = picked.flatMap((item) => (item.chat ? [item.chat] : []));
   try {
@@ -303,6 +340,7 @@ async function generateFromStarters(scope: WikiScope, deps: WikiDeps): Promise<v
 
 async function deletePage(scope: WikiScope, path: string, confirmed = false): Promise<void> {
   const state = stateFor(scope.key);
+  if (!leaveEdit(scope)) return;
   if (!confirmed && state.pendingDelete !== path) {
     state.pendingDelete = path;
     rerender();
@@ -330,6 +368,7 @@ function withoutTitle(markdown: string): string {
 
 async function openPage(scope: WikiScope, path: string): Promise<void> {
   const state = stateFor(scope.key);
+  if (state.edit && !leaveEdit(scope)) return;
   state.selected = path;
   if (state.pendingDelete && state.pendingDelete !== path) state.pendingDelete = null;
   state.pageError = null;
@@ -338,7 +377,7 @@ async function openPage(scope: WikiScope, path: string): Promise<void> {
   try {
     const markdown = await knowledgeReadPage({ projectPath: scope.projectPath, path });
     if (state.selected !== path) return;
-    state.page = { path, html: renderMarkdown(withoutTitle(markdown), { wikiLinks: true }) };
+    state.page = { path, html: renderMarkdown(withoutTitle(markdown), { wikiLinks: true }), source: markdown };
   } catch {
     if (state.selected !== path) return;
     state.pageError = t("chat.wikiPageMissing");
@@ -369,6 +408,7 @@ function ingestPrompt(root: string, sources: string[], kind: IngestKind): string
     `You maintain the knowledge wiki in ${root}. Your shell may start in a different folder, so always use these full paths. Read ${at("AGENTS.md")} first and follow it exactly.`,
     task,
     "When two pages say the same thing, keep one page, move any extra facts into it, delete the other page, and update the index. Do not leave a second page that only repeats the first.",
+    "The user may have edited pages in the app. Keep their wording and structure. Do not revert a page unless a new source contradicts it.",
     "PDF and Word files already have a plain-text copy beside them with `.txt` added to the name (for example `spec.pdf.txt`). Read that copy. Do not try to convert, render, or OCR any file yourself. If a PDF or Word file has no `.txt` copy, it could not be read: skip it.",
     "Only run commands that finish within a few seconds. Never start a command that keeps running in the background.",
     `Write every page in ${language}.`,
@@ -455,7 +495,7 @@ async function refreshRunPages(): Promise<void> {
       pages.length !== state.pages.length || pages.some((page, index) => page.path !== state.pages[index]?.path);
     if (changed) {
       state.pages = pages;
-      if (!state.selected || !pages.some((page) => page.path === state.selected)) {
+      if (!state.edit?.isNew && (!state.selected || !pages.some((page) => page.path === state.selected))) {
         state.selected = pages[0]?.path ?? null;
         state.page = null;
       }
@@ -578,6 +618,8 @@ async function runIngest(
 }
 
 async function addFromChat(scope: WikiScope, deps: WikiDeps): Promise<void> {
+  if (stateFor(scope.key).run) return;
+  if (!leaveEdit(scope)) return;
   const transcript = deps.chatTranscript();
   if (!transcript?.text.trim()) {
     setNotice(scope, { tone: "warn", text: t("chat.wikiChatEmpty") });
@@ -596,6 +638,8 @@ async function addFromChat(scope: WikiScope, deps: WikiDeps): Promise<void> {
 }
 
 async function addPicked(scope: WikiScope, deps: WikiDeps, directory: boolean): Promise<void> {
+  if (stateFor(scope.key).run) return;
+  if (!leaveEdit(scope)) return;
   let picked: string | string[] | null;
   try {
     picked = await open({ multiple: true, directory });
@@ -620,6 +664,7 @@ async function addPicked(scope: WikiScope, deps: WikiDeps, directory: boolean): 
 async function clearKnowledge(scope: WikiScope): Promise<void> {
   const state = stateFor(scope.key);
   if (state.run) return;
+  if (!leaveEdit(scope)) return;
   if (!state.pendingClear) {
     state.pendingClear = true;
     rerender();
@@ -631,6 +676,8 @@ async function clearKnowledge(scope: WikiScope): Promise<void> {
     state.pages = [];
     state.selected = null;
     state.page = null;
+    state.edit = null;
+    editorNodes = null;
     state.pageError = null;
     state.pendingDelete = null;
     state.starters = null;
@@ -645,6 +692,7 @@ async function clearKnowledge(scope: WikiScope): Promise<void> {
 
 async function mergeDuplicates(scope: WikiScope, deps: WikiDeps, focusPath?: string): Promise<void> {
   if (stateFor(scope.key).run) return;
+  if (!leaveEdit(scope)) return;
   closePageMenu();
   try {
     const root = await knowledgePrepare({ projectPath: scope.projectPath });
@@ -689,6 +737,17 @@ function openPageMenu(
   menu.className = "chat-project-menu";
   menu.setAttribute("role", "menu");
 
+  const editItem = document.createElement("button");
+  editItem.type = "button";
+  editItem.className = "chat-project-menu-item";
+  editItem.setAttribute("role", "menuitem");
+  editItem.textContent = t("chat.wikiEdit");
+  editItem.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closePageMenu();
+    void editFromMenu(scope, path);
+  });
+
   const merge = document.createElement("button");
   merge.type = "button";
   merge.className = "chat-project-menu-item";
@@ -716,7 +775,7 @@ function openPageMenu(
     void deletePage(scope, path, true);
   });
 
-  menu.append(merge, remove);
+  menu.append(editItem, merge, remove);
   document.body.append(menu);
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
@@ -725,6 +784,8 @@ function openPageMenu(
 }
 
 async function rebuild(scope: WikiScope, deps: WikiDeps): Promise<void> {
+  if (stateFor(scope.key).run) return;
+  if (!leaveEdit(scope)) return;
   stateFor(scope.key).pendingClear = false;
   try {
     const root = await knowledgePrepare({ projectPath: scope.projectPath });
@@ -742,6 +803,7 @@ function toolbar(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTM
     button(t("chat.wikiFromChat"), "kw-btn", () => void addFromChat(m.scope, m.deps), busy),
     button(t("chat.wikiAddFiles"), "kw-btn", () => void addPicked(m.scope, m.deps, false), busy),
     button(t("chat.wikiAddFolder"), "kw-btn", () => void addPicked(m.scope, m.deps, true), busy),
+    button(t("chat.wikiNewPage"), "kw-btn", () => startNewPage(m.scope), busy),
   );
   bar.append(sources);
   if (state.pages.length) {
@@ -885,12 +947,22 @@ function groupedPages(pages: KnowledgePage[]): PageGroup[] {
 
 function navList(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTMLElement {
   const list = el("div", "kw-tree");
+  if (state.edit?.isNew) {
+    const row = el("div", "kw-tree-row");
+    const item = button(state.edit.title.trim() || t("chat.wikiNewPage"), "kw-tree-item", () => {
+      editorNodes?.title.focus();
+    });
+    item.dataset.newPage = "1";
+    item.setAttribute("aria-current", "page");
+    row.append(item);
+    list.append(row);
+  }
   const q = state.query.trim().toLowerCase();
   const pages = q
     ? state.pages.filter((page) => `${page.title} ${page.path}`.toLowerCase().includes(q))
     : state.pages;
   if (!pages.length) {
-    list.append(el("p", "kw-tree-empty", t("chat.resourcesNoMatch")));
+    if (!state.edit?.isNew) list.append(el("p", "kw-tree-empty", t("chat.resourcesNoMatch")));
     return list;
   }
   const groups = groupedPages(pages);
@@ -970,7 +1042,376 @@ function navList(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTM
   return list;
 }
 
+function draftOf(scopeKey: string, state: WikiState): { title: string; body: string } | null {
+  const edit = state.edit;
+  if (!edit) return null;
+  const live = editorNodes && editorNodes.scopeKey === scopeKey && editorNodes.path === edit.path ? editorNodes : null;
+  return {
+    title: (live ? live.title.value : edit.title).trim(),
+    body: (live ? htmlToMarkdown(live.body) : edit.body).replace(/\s+$/, ""),
+  };
+}
+
+function editIsDirty(scopeKey: string, state: WikiState): boolean {
+  const edit = state.edit;
+  const draft = draftOf(scopeKey, state);
+  if (!edit || !draft) return false;
+  if (edit.isNew) return Boolean(draft.title || draft.body.trim());
+  return draft.title !== edit.baselineTitle.trim() || draft.body !== edit.baselineBody.replace(/\s+$/, "");
+}
+
+function canSave(scopeKey: string, state: WikiState): boolean {
+  const draft = draftOf(scopeKey, state);
+  return Boolean(draft?.title) && editIsDirty(scopeKey, state);
+}
+
+/** False when the open page still has unsaved words. Callers stay on that page. */
+function leaveEdit(scope: WikiScope): boolean {
+  const state = stateFor(scope.key);
+  const edit = state.edit;
+  if (!edit) return true;
+  if (editIsDirty(scope.key, state)) {
+    state.notice = { tone: "warn", text: t("chat.wikiUnsaved") };
+    rerender();
+    return false;
+  }
+  if (edit.isNew) state.selected = edit.returnPath;
+  state.edit = null;
+  editorNodes = null;
+  return true;
+}
+
+function syncSave(scopeKey: string): void {
+  const state = stateFor(scopeKey);
+  const edit = state.edit;
+  if (!edit || !mounted || mounted.scope.key !== scopeKey) return;
+  const save = mounted.host.querySelector<HTMLButtonElement>(".kw-save");
+  if (save) save.disabled = edit.saving || !canSave(scopeKey, state);
+  if (edit.cancelArmed) {
+    edit.cancelArmed = false;
+    const cancel = mounted.host.querySelector<HTMLButtonElement>(".kw-cancel");
+    if (cancel) cancel.textContent = t("chat.wikiCancel");
+  }
+  const label = mounted.host.querySelector<HTMLElement>("[data-new-page]");
+  if (label && edit.isNew) label.textContent = edit.title.trim() || t("chat.wikiNewPage");
+}
+
+function activeScope(scopeKey: string): WikiScope | null {
+  return mounted && mounted.scope.key === scopeKey ? mounted.scope : null;
+}
+
+function ensureEditor(scopeKey: string, edit: EditState): EditorNodes {
+  if (editorNodes && editorNodes.scopeKey === scopeKey && editorNodes.path === edit.path) return editorNodes;
+  const title = document.createElement("input");
+  title.type = "text";
+  title.className = "kw-title-input";
+  title.value = edit.title;
+  title.placeholder = t("chat.wikiTitlePlaceholder");
+  title.setAttribute("aria-label", t("chat.wikiTitlePlaceholder"));
+  title.autocomplete = "off";
+  title.spellcheck = false;
+  const body = document.createElement("div");
+  body.className = "kw-editor kw-doc chat-md";
+  body.contentEditable = "true";
+  body.spellcheck = true;
+  body.dataset.placeholder = t("chat.wikiBodyPlaceholder");
+  body.setAttribute("role", "textbox");
+  body.setAttribute("aria-multiline", "true");
+  body.setAttribute("aria-label", t("chat.wikiBodyPlaceholder"));
+  body.innerHTML = renderMarkdown(edit.body, { wikiLinks: true });
+  if (!edit.isNew) {
+    const normalized = htmlToMarkdown(body).replace(/\s+$/, "");
+    edit.baselineBody = normalized;
+    edit.body = normalized;
+  }
+  const remember = () => {
+    const current = stateFor(scopeKey).edit;
+    if (!current || current.saving) return;
+    current.title = title.value;
+    syncSave(scopeKey);
+  };
+  title.addEventListener("input", remember);
+  body.addEventListener("input", () => {
+    if (!composing) remember();
+  });
+  body.addEventListener("compositionstart", () => {
+    composing = true;
+  });
+  body.addEventListener("compositionend", () => {
+    composing = false;
+    remember();
+  });
+  const onKey = (event: KeyboardEvent) => {
+    if (event.isComposing || composing) return;
+    const scope = activeScope(scopeKey);
+    if (!scope) return;
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s" && !event.altKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      void saveEdit(scope);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEdit(scope);
+    }
+  };
+  title.addEventListener("keydown", (event) => {
+    onKey(event);
+    if (event.key === "Enter" && !event.isComposing && !composing) {
+      event.preventDefault();
+      body.focus();
+    }
+  });
+  body.addEventListener("keydown", onKey);
+  body.addEventListener("paste", (event) => {
+    if (stateFor(scopeKey).edit?.saving) return;
+    const text = event.clipboardData?.getData("text/plain");
+    if (text == null) return;
+    event.preventDefault();
+    if (document.execCommand("insertText", false, text)) return;
+    const selection = document.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(document.createTextNode(text));
+    range.collapse(false);
+    remember();
+  });
+  body.addEventListener("drop", (event) => event.preventDefault());
+  body.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("a")) event.preventDefault();
+  });
+  editorNodes = { scopeKey, path: edit.path, title, body, didFocus: false };
+  return editorNodes;
+}
+
+function startEdit(scope: WikiScope): void {
+  const state = stateFor(scope.key);
+  if (state.run) return;
+  const source = state.page;
+  if (!source || source.path !== state.selected) return;
+  if (state.edit && !state.edit.isNew && state.edit.path === source.path) return;
+  if (!leaveEdit(scope)) return;
+  const split = splitWikiPage(source.source);
+  const known = state.pages.find((page) => page.path === source.path)?.title ?? "";
+  const title = split.title || known;
+  state.edit = {
+    path: source.path,
+    isNew: false,
+    title,
+    body: split.body,
+    baselineTitle: title,
+    baselineBody: "",
+    saving: false,
+    cancelArmed: false,
+    returnPath: source.path,
+  };
+  state.pendingDelete = null;
+  state.notice = null;
+  rerender();
+}
+
+function startNewPage(scope: WikiScope): void {
+  const state = stateFor(scope.key);
+  if (state.run) return;
+  if (state.edit?.isNew) {
+    editorNodes?.title.focus();
+    return;
+  }
+  if (!leaveEdit(scope)) return;
+  state.edit = {
+    path: nextNotePath(state.pages.map((page) => page.path)),
+    isNew: true,
+    title: "",
+    body: "",
+    baselineTitle: "",
+    baselineBody: "",
+    saving: false,
+    cancelArmed: false,
+    returnPath: state.selected,
+  };
+  state.selected = null;
+  state.pendingDelete = null;
+  state.notice = null;
+  rerender();
+}
+
+function cancelEdit(scope: WikiScope): void {
+  const state = stateFor(scope.key);
+  const edit = state.edit;
+  if (!edit || edit.saving) return;
+  if (editIsDirty(scope.key, state) && !edit.cancelArmed) {
+    edit.cancelArmed = true;
+    const cancel = mounted?.host.querySelector<HTMLButtonElement>(".kw-cancel");
+    if (cancel) {
+      cancel.textContent = t("chat.wikiDiscard");
+      return;
+    }
+    rerender();
+    return;
+  }
+  const back = edit.returnPath;
+  const wasNew = edit.isNew;
+  state.edit = null;
+  editorNodes = null;
+  state.notice = null;
+  if (wasNew) state.selected = back;
+  rerender();
+  if (wasNew && state.selected && state.page?.path !== state.selected && isMounted(scope)) void openPage(scope, state.selected);
+}
+
+async function editFromMenu(scope: WikiScope, path: string): Promise<void> {
+  const state = stateFor(scope.key);
+  if (state.run) return;
+  if (state.edit && !state.edit.isNew && state.edit.path === path) return;
+  if (!leaveEdit(scope)) return;
+  if (state.selected !== path || state.page?.path !== path) await openPage(scope, path);
+  const next = stateFor(scope.key);
+  if (next.page?.path === path && next.selected === path) startEdit(scope);
+}
+
+async function touchIndex(scope: WikiScope, path: string, title: string, summary: string, relabel: boolean): Promise<void> {
+  if (path === "index.md" || path === "log.md") return;
+  try {
+    const index = await knowledgeReadPage({ projectPath: scope.projectPath, path: "index.md" });
+    const next = upsertIndexLink(index, path, title, summary, relabel);
+    if (next === index) return;
+    await knowledgeSavePage({ projectPath: scope.projectPath, path: "index.md", content: next });
+  } catch {
+    /* The page itself is already saved. A missing index still lists it for the next question. */
+  }
+}
+
+async function saveEdit(scope: WikiScope): Promise<void> {
+  const state = stateFor(scope.key);
+  const edit = state.edit;
+  if (!edit || edit.saving) return;
+  const draft = draftOf(scope.key, state);
+  if (!draft) return;
+  if (!draft.title) {
+    state.notice = { tone: "warn", text: t("chat.wikiNeedTitle") };
+    editorNodes?.title.focus();
+    rerender();
+    return;
+  }
+  if (!editIsDirty(scope.key, state)) return;
+  const content = joinWikiPage(draft.title, draft.body);
+  if (new TextEncoder().encode(content).length > WIKI_PAGE_MAX_BYTES) {
+    state.notice = { tone: "warn", text: t("chat.wikiTooLong") };
+    rerender();
+    return;
+  }
+  edit.saving = true;
+  state.notice = null;
+  rerender();
+  const relabel = edit.isNew || draft.title !== edit.baselineTitle.trim();
+  const summary = edit.isNew ? plainLead(draft.body) : "";
+  try {
+    await knowledgeSavePage({ projectPath: scope.projectPath, path: edit.path, content });
+    await touchIndex(scope, edit.path, draft.title, summary, relabel);
+  } catch {
+    edit.saving = false;
+    state.notice = { tone: "warn", text: t("chat.wikiSaveFailed") };
+    rerender();
+    return;
+  }
+  const path = edit.path;
+  state.edit = null;
+  editorNodes = null;
+  state.selected = path;
+  state.page = { path, source: content, html: renderMarkdown(withoutTitle(content), { wikiLinks: true }) };
+  state.notice = { tone: "ok", text: t("chat.wikiSaved") };
+  await reloadPages(scope).catch(() => {});
+  syncKnowledgeFolder(scope.projectPath);
+  rerender();
+  if (isMounted(scope)) await openPage(scope, path);
+}
+
+function textOffset(root: HTMLElement, target: Node, offset: number): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let count = 0;
+  let current = walker.nextNode();
+  while (current) {
+    if (current === target) return count + offset;
+    count += current.textContent?.length ?? 0;
+    current = walker.nextNode();
+  }
+  return count;
+}
+
+function captureSelection(root: HTMLElement): { start: number; end: number } | null {
+  const selection = document.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  if (range.startContainer.nodeType !== Node.TEXT_NODE || range.endContainer.nodeType !== Node.TEXT_NODE) return null;
+  return {
+    start: textOffset(root, range.startContainer, range.startOffset),
+    end: textOffset(root, range.endContainer, range.endOffset),
+  };
+}
+
+function restoreSelection(root: HTMLElement, selection: { start: number; end: number }): void {
+  const point = (offset: number): { node: Node; offset: number } | null => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let left = offset;
+    let last: Node | null = null;
+    let current = walker.nextNode();
+    while (current) {
+      const len = current.textContent?.length ?? 0;
+      if (left <= len) return { node: current, offset: left };
+      left -= len;
+      last = current;
+      current = walker.nextNode();
+    }
+    if (!last) return null;
+    return { node: last, offset: last.textContent?.length ?? 0 };
+  };
+  const start = point(selection.start);
+  const end = point(selection.end);
+  if (!start || !end) return;
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  const selected = document.getSelection();
+  selected?.removeAllRanges();
+  selected?.addRange(range);
+}
+
+function editView(scope: WikiScope, state: WikiState): HTMLElement {
+  const edit = state.edit;
+  const view = el("article", "kw-page is-editing");
+  if (!edit) return view;
+  const nodes = ensureEditor(scope.key, edit);
+  const head = el("header", "kw-page-head");
+  head.append(nodes.title);
+  const meta = el("div", "kw-page-meta");
+  meta.append(el("span", "kw-edit-hint", t("chat.wikiEditHint")));
+  meta.append(
+    button(
+      edit.saving ? t("chat.wikiSaving") : t("chat.wikiSave"),
+      "kw-btn kw-btn-solid kw-save",
+      () => void saveEdit(scope),
+      edit.saving || !canSave(scope.key, state),
+    ),
+    button(
+      edit.cancelArmed ? t("chat.wikiDiscard") : t("chat.wikiCancel"),
+      "kw-btn kw-btn-quiet kw-cancel",
+      () => cancelEdit(scope),
+      edit.saving,
+    ),
+  );
+  head.append(meta);
+  view.append(head, nodes.body);
+  nodes.title.readOnly = edit.saving;
+  nodes.body.contentEditable = edit.saving ? "false" : "true";
+  return view;
+}
+
 function pageView(m: { scope: WikiScope }, state: WikiState): HTMLElement {
+  if (state.edit && (state.edit.isNew || state.edit.path === state.selected)) return editView(m.scope, state);
   const view = el("article", "kw-page");
   const info = state.pages.find((page) => page.path === state.selected);
   if (!info) return view;
@@ -979,12 +1420,17 @@ function pageView(m: { scope: WikiScope }, state: WikiState): HTMLElement {
   const meta = el("div", "kw-page-meta");
   const updated = dateText(info.modifiedMs);
   if (updated) meta.append(el("span", "", t("chat.wikiUpdated", { time: updated })));
+  const actions = el("span", "kw-page-actions");
+  if (state.page?.path === info.path && !state.pageError) {
+    actions.append(button(t("chat.wikiEdit"), "kw-btn kw-edit", () => startEdit(m.scope), Boolean(state.run)));
+  }
   const removing = state.pendingDelete === info.path;
   const remove = button(removing ? t("chat.wikiDeleteConfirm") : t("chat.wikiDelete"), "kw-delete", () => {
     void deletePage(m.scope, info.path);
   });
   remove.classList.toggle("is-armed", removing);
-  meta.append(remove);
+  actions.append(remove);
+  meta.append(actions);
   head.append(meta);
   view.append(head);
   if (state.pageError) {
@@ -1087,6 +1533,22 @@ function navResizer(body: HTMLElement): HTMLElement {
 
 function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): void {
   const state = stateFor(m.scope.key);
+  const viewPath = state.edit?.path ?? state.page?.path ?? "";
+  const oldPage = m.host.querySelector<HTMLElement>(".kw-page");
+  const oldTree = m.host.querySelector<HTMLElement>(".kw-tree");
+  const keepPage = oldPage?.dataset.path === viewPath ? oldPage.scrollTop : 0;
+  const keepTree = oldTree?.scrollTop ?? 0;
+  const live =
+    editorNodes && state.edit && editorNodes.scopeKey === m.scope.key && editorNodes.path === state.edit.path
+      ? editorNodes
+      : null;
+  const bodyFocused = Boolean(
+    live && document.activeElement && (document.activeElement === live.body || live.body.contains(document.activeElement)),
+  );
+  const titleFocused = Boolean(live && document.activeElement === live.title);
+  const selection = bodyFocused && live && !composing ? captureSelection(live.body) : null;
+  const titleRange = titleFocused && live ? ([live.title.selectionStart ?? 0, live.title.selectionEnd ?? 0] as const) : null;
+  if (!state.edit) editorNodes = null;
   closePageMenu();
   const root = el("div", "kw");
   root.append(toolbar(m, state));
@@ -1094,6 +1556,8 @@ function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): voi
   if (notice) root.append(notice);
   if (!state.loaded) {
     root.append(el("p", "kw-hint", state.error ?? t("chat.wikiLoading")));
+  } else if (state.edit?.isNew && !state.pages.length && !state.run) {
+    root.append(editView(m.scope, state));
   } else if (!state.pages.length && !state.run) {
     root.append(starterView(m, state));
   } else if (state.pages.length) {
@@ -1114,18 +1578,29 @@ function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): voi
     body.append(nav, navResizer(body), pageView(m, state));
     root.append(body);
   }
-  const oldPage = m.host.querySelector<HTMLElement>(".kw-page");
-  const oldTree = m.host.querySelector<HTMLElement>(".kw-tree");
-  const keepPage = oldPage?.dataset.path === state.page?.path ? oldPage?.scrollTop : 0;
-  const keepTree = oldTree?.scrollTop ?? 0;
   m.host.replaceChildren(root);
   const page = root.querySelector<HTMLElement>(".kw-page");
   if (page) {
-    page.dataset.path = state.page?.path ?? "";
-    page.scrollTop = keepPage ?? 0;
+    page.dataset.path = viewPath;
+    page.scrollTop = keepPage;
   }
   const tree = root.querySelector<HTMLElement>(".kw-tree");
   if (tree) tree.scrollTop = keepTree;
+  const nodes =
+    editorNodes && state.edit && editorNodes.scopeKey === m.scope.key && editorNodes.path === state.edit.path
+      ? editorNodes
+      : null;
+  if (!nodes || composing) return;
+  if (!nodes.didFocus) {
+    nodes.didFocus = true;
+    (state.edit?.isNew ? nodes.title : nodes.body).focus();
+    return;
+  }
+  if (selection) restoreSelection(nodes.body, selection);
+  else if (titleRange) {
+    nodes.title.focus();
+    nodes.title.setSelectionRange(titleRange[0], titleRange[1]);
+  }
 }
 
 export function mountWiki(host: HTMLElement, scope: WikiScope, deps: WikiDeps): void {

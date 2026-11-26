@@ -952,10 +952,67 @@ html[data-theme="dark"] .kw-search.chat-knowledge-input {
 .kw-page-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
   margin: 0;
   color: var(--faint);
   font-size: 0.76rem;
+}
+
+.kw-page-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kw-edit {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 0.76rem;
+}
+
+.kw-edit-hint {
+  color: var(--muted);
+}
+
+.kw-title-input {
+  width: 100%;
+  margin: 0;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--md-heading);
+  font: inherit;
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+
+.kw-title-input:focus {
+  outline: none;
+  border-bottom-color: var(--line-strong);
+}
+
+.kw-title-input::placeholder {
+  color: var(--faint);
+  font-weight: 600;
+}
+
+.kw-page.is-editing .kw-editor {
+  min-height: 280px;
+  outline: none;
+  caret-color: var(--text);
+}
+
+.kw-editor:empty::before,
+.kw-editor:has(> br:only-child)::before {
+  content: attr(data-placeholder);
+  color: var(--faint);
+  pointer-events: none;
 }
 
 .kw-delete {

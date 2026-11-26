@@ -25,7 +25,7 @@ const SKIP_DIRS: &[&str] = &[
 
 const SCHEMA: &str = r#"# Knowledge wiki rules
 
-This folder is a knowledge wiki that an AI assistant keeps for one user. The user does not edit it by hand; you own it.
+This folder is a knowledge wiki. An assistant keeps it, and the user can also edit any page in the app. A page the user edited says what they want: keep their wording and structure. Change a fact only when a new source contradicts it, and then keep both claims as a conflict. Do not revert a page to an older version.
 
 ## Layout
 - `raw/` holds the sources the user added: chat transcripts, documents, folders, and unpacked zip files. Read them. Never edit, move, or delete anything in `raw/`.
@@ -122,6 +122,11 @@ fn prepare_root(project_path: Option<&str>) -> Result<PathBuf, String> {
     let schema = root.join("AGENTS.md");
     if !schema.exists() {
         fs::write(&schema, SCHEMA).map_err(cannot)?;
+    } else if fs::read_to_string(&schema)
+        .unwrap_or_default()
+        .contains("The user does not edit it by hand")
+    {
+        let _ = fs::write(&schema, SCHEMA);
     }
     Ok(root)
 }
@@ -1006,6 +1011,16 @@ mod tests {
         );
         knowledge_save_page_blocking(project_str.clone(), "index.md".into(), "# Index\n".into())
             .unwrap();
+        fs::write(
+            root.join("AGENTS.md"),
+            "The user does not edit it by hand; you own it.\n",
+        )
+        .unwrap();
+        knowledge_save_page_blocking(project_str.clone(), "index.md".into(), "# Index\n".into())
+            .unwrap();
+        let schema = fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(schema.contains("the user can also edit"));
+        assert!(!schema.contains("does not edit it by hand"));
         knowledge_clear_blocking(project_str.clone()).unwrap();
         assert!(!root.exists());
         assert!(
