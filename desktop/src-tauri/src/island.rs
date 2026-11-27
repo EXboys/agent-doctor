@@ -364,10 +364,11 @@ pub(crate) fn island_chrome(
     }
 }
 
-/// Windows shows a short chip whenever a turn needs to be seen, including
-/// while the conversation window is in front. A sticky click (or hover after
-/// expand) grows it into a card. Auto-open only for questions that are not
-/// Allow/Deny — those buttons already live in the conversation window.
+/// A short chip. It stays while nothing is running unless hide-when-idle is
+/// on, and a click grows it into the card either way. While a turn is running
+/// and the conversation window is already in front, the chip stays short until
+/// that click. A question opens the card on its own, except Allow/Deny, whose
+/// buttons already live in the conversation window.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn windows_status_chrome(
     ask_in_front: bool,
@@ -376,9 +377,10 @@ pub(crate) fn windows_status_chrome(
     composing: bool,
     folded: bool,
     opened: bool,
+    hide_when_idle: bool,
     awake: bool,
 ) -> Chrome {
-    if !awake {
+    if hide_when_idle && !awake && !hovering && !opened {
         return Chrome::Hidden;
     }
     // Coming back to the conversation clears hover/opened in `apply_once`.
@@ -692,6 +694,7 @@ fn apply_once(app: &AppHandle) {
                 guard.snapshot.composing,
                 guard.folded,
                 guard.opened,
+                guard.snapshot.hide_when_idle,
                 awake,
             ),
         );
@@ -2691,7 +2694,7 @@ mod tests {
     #[test]
     fn windows_keeps_the_chip_while_the_conversation_is_in_front() {
         assert_eq!(
-            windows_status_chrome(true, false, false, false, false, false, true),
+            windows_status_chrome(true, false, false, false, false, false, false, true),
             Chrome::Pill
         );
     }
@@ -2699,15 +2702,23 @@ mod tests {
     #[test]
     fn windows_hides_the_chip_while_nothing_is_running() {
         assert_eq!(
-            windows_status_chrome(false, false, false, false, false, false, false),
+            windows_status_chrome(false, false, false, false, false, false, true, false),
             Chrome::Hidden
+        );
+    }
+
+    #[test]
+    fn windows_keeps_an_idle_chip_until_hiding_is_on() {
+        assert_eq!(
+            windows_status_chrome(false, false, false, false, false, false, false, false),
+            Chrome::Pill
         );
     }
 
     #[test]
     fn windows_shows_a_chip_when_the_conversation_is_covered() {
         assert_eq!(
-            windows_status_chrome(false, false, false, false, false, false, true),
+            windows_status_chrome(false, false, false, false, false, false, false, true),
             Chrome::Pill
         );
     }
@@ -2715,11 +2726,20 @@ mod tests {
     #[test]
     fn windows_opens_a_card_on_a_sticky_click() {
         assert_eq!(
-            windows_status_chrome(false, false, false, false, false, true, true),
+            windows_status_chrome(false, false, false, false, false, true, false, true),
             Chrome::Peek
         );
         assert_eq!(
-            windows_status_chrome(true, false, false, false, false, true, true),
+            windows_status_chrome(true, false, false, false, false, true, false, true),
+            Chrome::Peek
+        );
+        // Nothing running: the click still opens the card.
+        assert_eq!(
+            windows_status_chrome(false, false, false, false, false, true, false, false),
+            Chrome::Peek
+        );
+        assert_eq!(
+            windows_status_chrome(true, false, false, false, false, true, true, false),
             Chrome::Peek
         );
     }
@@ -2727,12 +2747,12 @@ mod tests {
     #[test]
     fn windows_opens_a_card_for_a_typed_question() {
         assert_eq!(
-            windows_status_chrome(false, false, true, false, false, false, true),
+            windows_status_chrome(false, false, true, false, false, false, false, true),
             Chrome::Peek
         );
         // Allow/Deny stays on the conversation window; attention is false there.
         assert_eq!(
-            windows_status_chrome(false, false, false, false, false, false, true),
+            windows_status_chrome(false, false, false, false, false, false, false, true),
             Chrome::Pill
         );
     }

@@ -83,6 +83,16 @@ type IslandFeedRow = IslandRow;
 
 function setHover(hovering: boolean, sticky = false): void {
   window.clearTimeout(hoverTimer);
+  // The Windows chip opens on click, not hover. The resize that follows the
+  // click reports a leave before the card is on screen, and that leave used
+  // to cancel the click. Once the card is open, leaving still folds it.
+  if (
+    !hovering &&
+    document.documentElement.classList.contains("is-status-chip") &&
+    !root?.classList.contains("is-expanded")
+  ) {
+    return;
+  }
   if (hovering) {
     if (pointerInside && !sticky) return;
     pointerInside = true;
