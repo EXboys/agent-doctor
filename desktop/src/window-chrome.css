@@ -99,8 +99,43 @@ html.is-opaque-shell[data-os="windows"] .widget-toolbar,
 html[data-os="windows"] .widget-toolbar {
   height: var(--window-controls-h);
   margin-bottom: 8px;
-  padding-right: calc(var(--window-controls-w) + 4px);
+  /* Caption buttons sit on this same row, at the window edge. */
+  padding-right: calc(var(--window-controls-w) + 8px);
   align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+html.is-opaque-shell[data-os="windows"] .widget-toolbar .brand,
+html[data-os="windows"] .widget-toolbar .brand {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 6px;
+}
+
+html.is-opaque-shell[data-os="windows"] .widget-toolbar .brand-name,
+html[data-os="windows"] .widget-toolbar .brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html.is-opaque-shell[data-os="windows"] .widget-toolbar .toolbar-actions,
+html[data-os="windows"] .widget-toolbar .toolbar-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+html.is-opaque-shell[data-os="windows"] .widget-toolbar .lang-btn,
+html[data-os="windows"] .widget-toolbar .lang-btn {
+  padding: 3px 5px;
+}
+
+html.is-opaque-shell[data-os="windows"] .widget-toolbar .btn-scan,
+html[data-os="windows"] .widget-toolbar .btn-scan {
+  padding: 4px 8px 4px 6px;
+  gap: 3px;
 }
 
 html[data-os="macos"]:not(.is-window-fullscreen) .widget-toolbar {
