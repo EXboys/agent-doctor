@@ -16,13 +16,16 @@ client-side lives in `crates/agent-doctor-core/src/install_ping.rs`.
   "arch": "aarch64",            // aarch64 | x86_64 | …
   "edition": "personal",        // personal | team
   "client": "desktop",          // which shipped surface sent it
-  "first_run": false            // true only on the launch that created the ID
+  "first_run": false,           // true only on the launch that created the ID
+  "license": "tu_…"             // only when this machine is signed in; omitted otherwise
 }
 ```
 
-No account link, no hardware fingerprint, no paths, no usernames. The ID is
-random, so it identifies an installation, not a person. Reinstalling or
-clearing the settings DB counts as a new machine (slight overcount, accepted).
+No hardware fingerprint, no paths, no usernames. The ID is random, so it
+identifies an installation, not a person. When the machine is signed in, the
+license lets the site show that member's name; the license itself is not
+stored. Reinstalling or clearing the settings DB counts as a new machine
+(slight overcount, accepted).
 
 ## Server side (agentdoctor.cn)
 
@@ -73,5 +76,5 @@ on a background thread 10 s after launch (`spawn_install_ping` in
 ## Privacy note
 
 Disclose the counting in the site privacy policy: "匿名装机统计 — 上报随机
-ID、应用版本和系统类型，不含任何个人数据，可在应用内关闭。" Do not add
-fields (IP-derived IDs, hostnames, paths) to the payload.
+ID、应用版本和系统类型。已登录时附带许可证，用来在后台显示会员名，许可证本身不落库。可在应用内关闭。"
+Do not add IP-derived IDs, hostnames, or paths to the payload.

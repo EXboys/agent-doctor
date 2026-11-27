@@ -2,9 +2,9 @@
 //!
 //! One random UUID per installation is generated on first launch and stored in
 //! the local settings DB. Each launch sends a single tiny POST with that ID,
-//! the app version, and the platform. No user data, no hardware fingerprint,
-//! no account link — the server stores one row per ID with first/last-seen
-//! times, and the ID itself carries nothing personal.
+//! the app version, and the platform. No hardware fingerprint. A signed-in
+//! machine may include its TeamUps license so the site can show the member
+//! name; the license itself is not stored. The server keeps one row per ID.
 //!
 //! Server contract (agentdoctor.cn): `POST /api/v1/doctor/install/ping`,
 //! JSON body, any 2xx accepted, failures ignored by the client.
@@ -69,6 +69,10 @@ pub struct InstallPing {
     pub client: &'static str,
     /// True only on the launch that created the ID.
     pub first_run: bool,
+    /// TeamUps license when this machine is signed in. Omitted otherwise.
+    /// The site resolves it to a member name and does not store the license.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
 }
 
 /// Ping endpoint, overridable for local testing.
@@ -89,6 +93,10 @@ pub fn send_install_ping() -> Result<Option<InstallPing>> {
         return Ok(None);
     }
     let (install_id, first_run) = ensure_install_id(&store)?;
+    let license = store
+        .get_teamups_license()?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let ping = InstallPing {
         install_id,
         version: env!("CARGO_PKG_VERSION"),
@@ -97,6 +105,7 @@ pub fn send_install_ping() -> Result<Option<InstallPing>> {
         edition: product_edition().as_str(),
         client: "desktop",
         first_run,
+        license,
     };
     post_install_ping(&install_ping_url(), &ping)?;
     Ok(Some(ping))
@@ -172,6 +181,7 @@ mod tests {
             edition: product_edition().as_str(),
             client: "desktop",
             first_run,
+            license: None,
         };
         let json = serde_json::to_value(&ping).unwrap();
         let keys = json.as_object().unwrap();
