@@ -370,6 +370,7 @@ pub(crate) fn island_chrome(
 /// that click. A question opens the card on its own, except Allow/Deny, whose
 /// buttons already live in the conversation window.
 #[cfg_attr(not(windows), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn windows_status_chrome(
     ask_in_front: bool,
     hovering: bool,
