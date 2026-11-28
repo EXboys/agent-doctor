@@ -20,7 +20,7 @@ toml_edit.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 zip = "9"
 sha2 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 base64 = "0.23"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc", "block-padding"] }
