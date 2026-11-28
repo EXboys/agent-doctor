@@ -1322,11 +1322,14 @@ fn seed_default_workspace_in_background() {
 
 /// Skill links run on their own thread. The window is already up, and a missing
 /// folder or a denied permission must not surface as a startup error.
+/// Built-in office skills come from the official free page. A failed download
+/// leaves the launch alone.
 fn spawn_skill_link_repair() {
     let _ = std::thread::Builder::new()
         .name("ad-skill-links".into())
         .spawn(|| {
             let _ = std::panic::catch_unwind(|| {
+                agent_doctor_core::skills::install_builtin_free_resources();
                 agent_doctor_core::skills::repair_skill_links_at_launch();
             });
         });

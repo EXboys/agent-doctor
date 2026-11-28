@@ -145,6 +145,66 @@ fn resources_to_items(payload: &ResourcesPayload, base_url: &str) -> Vec<Teamups
     out
 }
 
+/// Office skills already hosted on the official free page. The client fills in
+/// any of these that are not already on this computer.
+pub const BUILTIN_FREE_SKILL_IDS: &[&str] = &[
+    "excel-xlsx",
+    "word-docx",
+    "powerpoint-pptx",
+    "ppt-generator",
+];
+
+/// Ids from [`BUILTIN_FREE_SKILL_IDS`] that do not already have a `SKILL.md`.
+pub fn missing_builtin_skill_ids(skills_dir: &std::path::Path) -> Vec<&'static str> {
+    BUILTIN_FREE_SKILL_IDS
+        .iter()
+        .copied()
+        .filter(|id| !skills_dir.join(id).join("SKILL.md").is_file())
+        .collect()
+}
+
+/// Download the built-in free skills from the official site. Skills already
+/// on disk are left alone. A network failure installs nothing and returns 0.
+pub fn install_builtin_free_resources() -> usize {
+    let Ok(store) = crate::store::open_settings_store() else {
+        return 0;
+    };
+    let Ok(layout) = load_local_skills_layout_from_store(&store) else {
+        return 0;
+    };
+    let missing = missing_builtin_skill_ids(&layout.skills_dir);
+    if missing.is_empty() {
+        return 0;
+    }
+    let Ok(base_url) = super::mall::teamups_mall_base_url(&store) else {
+        return 0;
+    };
+    let Ok(items) = fetch_free_resources(&base_url) else {
+        return 0;
+    };
+    let mut added = 0usize;
+    for id in missing {
+        let Some(item) = items.iter().find(|item| item.id == id) else {
+            continue;
+        };
+        let Ok(blob) = download_resource_zip(item.download_url.as_deref().unwrap_or("")) else {
+            continue;
+        };
+        if install_resource_blob(
+            &layout,
+            id,
+            item.version.as_deref(),
+            item.sha256.as_deref(),
+            &blob,
+        )
+        .is_ok()
+        {
+            added += 1;
+        }
+    }
+    added
+}
+
 /// Install one free storefront skill by its catalog key.
 pub fn install_free_resource(id: &str) -> Result<SyncReport> {
     let id = id.trim();
@@ -481,6 +541,19 @@ mod tests {
     }
 
     #[test]
+    fn builtin_ids_skip_skills_already_on_disk() {
+        let dir = tempdir().unwrap();
+        let skills = dir.path().join("skills");
+        fs::create_dir_all(skills.join("excel-xlsx")).unwrap();
+        fs::write(skills.join("excel-xlsx").join("SKILL.md"), "# kept\n").unwrap();
+        let missing = missing_builtin_skill_ids(&skills);
+        assert!(!missing.contains(&"excel-xlsx"));
+        assert!(missing.contains(&"word-docx"));
+        assert!(missing.contains(&"powerpoint-pptx"));
+        assert!(missing.contains(&"ppt-generator"));
+    }
+
+    #[test]
     fn absolute_url_handles_relative_and_absolute() {
         assert_eq!(
             absolute_url("https://agentdoctor.cn", "/api/v1/x.zip"),
@@ -489,6 +562,20 @@ mod tests {
         assert_eq!(
             absolute_url("https://agentdoctor.cn", "https://else.example/x.zip"),
             "https://else.example/x.zip"
+        );
+    }
+
+    #[test]
+    #[ignore = "downloads the four builtin skills from agentdoctor.cn into the local skills folder"]
+    fn live_install_builtin_free_resources() {
+        let added = install_builtin_free_resources();
+        let store = crate::store::open_settings_store().expect("settings");
+        let layout = load_local_skills_layout_from_store(&store).expect("layout");
+        let missing = missing_builtin_skill_ids(&layout.skills_dir);
+        assert!(
+            missing.is_empty(),
+            "installed {added}, still missing {missing:?} under {}",
+            layout.skills_dir.display()
         );
     }
 
